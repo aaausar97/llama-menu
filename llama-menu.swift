@@ -19,8 +19,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var contextSize: Int = 16384
     var kvCacheType: String = "q8_0"
     var batchSize: Int = 2048
-    var useMlock: Bool = true
-    var useHighPrio: Bool = true
+    var useMlock: Bool = false
+    var useHighPrio: Bool = false
     var useFlashAttn: Bool = true
     var useNUMA: Bool = false
     var useContinuousBatching: Bool = false
@@ -326,8 +326,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if repeatPenalty != 1.1 { flags += ["--repeat-penalty", String(format: "%.2f", repeatPenalty)] }
         }
         let task = Process(); task.executableURL = URL(fileURLWithPath: serverBinary); task.arguments = flags
-        do { try task.run(); serverTask = task; isRunning = true; lastActivity = Date(); startActivityTimer(); updateMenu()
+        do {
+            try task.run(); serverTask = task; lastActivity = Date(); startActivityTimer()
+            // Wait for server to be ready (up to 60s for large models)
+            DispatchQueue.global().async { [weak self] in
+                guard let self = self else { return }
+                for _ in 0..<60 {
+                    let task = Process(); task.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+                    task.arguments = ["-s", "--max-time", "2", "http://127.0.0.1:\(port)/health"]
+                    let pipe = Pipe(); task.standardOutput = pipe; task.standardError = pipe
+                    do { try task.run(); task.waitUntilExit()
+                        if task.terminationStatus == 0 {
+                            DispatchQueue.main.async { self.isRunning = true; self.updateMenu() }
+                            return
+                        }
+                    } catch {}
+                    sleep(1)
+                }
+                DispatchQueue.main.async { self.showAlert("Server timeout", "Model not responding after 60s") }
+            }
             task.terminationHandler = { [weak self] _ in DispatchQueue.main.async { self?.isRunning = false; self?.serverTask = nil; self?.stopActivityTimer(); self?.updateMenu() } }
+            updateMenu() // Show "starting..." state immediately
         } catch { showAlert("Failed to start server", error.localizedDescription) }
     }
 

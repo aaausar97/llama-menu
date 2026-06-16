@@ -6,7 +6,7 @@ All models stored in `~/.models/`. Only one model runs at a time on 24GB RAM.
 |-------|-------|-----------|-----------|----------|
 | `qwen9` | Qwen3.5-9B-Instruct Q4_K_M | 5.7GB | ~6.5GB | Daily driver — agentic, tool calling, coding |
 | `gemma12` | Gemma 4 12B Instruct Q4_K_M | 7.1GB | ~7.5GB | Coding, 128K context, multimodal |
-| `gemma26` | Gemma 4 26B-A4B UD-Q4_K_M | 16GB | ~16GB | Best reasoning, MoE (4B active params) |
+| `gemma26` | Gemma 4 26B-A4B Q4_K_M | 16GB | ~16GB | Best reasoning, MoE (4B active params) |
 | `draft` | Qwen3.5-0.8B Q4_K_M | 553MB | ~0.5GB | Speculative decoding draft model |
 
 ## Performance (M5 Pro 24GB)

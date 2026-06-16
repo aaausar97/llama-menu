@@ -79,10 +79,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Status line
         let idleMin = isRunning ? Int(Date().timeIntervalSince(lastActivity) / 60) : 0
         let idleStr = (isRunning && idleMin > 0) ? " idle \(idleMin)m" : ""
-        let modelStr = modelLoaded ? "loaded" : "unloaded"
         let statusTitle: String
-        if isRunning {
-            statusTitle = modelLoaded ? "● Running (\(currentModel))\(idleStr)" : "● Idle (\(currentModel)) - model unloaded"
+        if isRunning && modelLoaded {
+            statusTitle = "● Running (\(currentModel))\(idleStr)"
+        } else if isRunning {
+            statusTitle = "● Idle (\(currentModel))"
         } else {
             statusTitle = "○ Stopped"
         }
@@ -91,7 +92,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Main model list (no drafts)
         for m in models {
-            let item = NSMenuItem(title: m.1 + (isRunning && currentModel == m.0 ? " ✓" : ""), action: #selector(switchModel(_:)), keyEquivalent: "")
+            let checkmark = (isRunning && modelLoaded && currentModel == m.0) ? " ✓" : ""
+            let item = NSMenuItem(title: m.1 + checkmark, action: #selector(switchModel(_:)), keyEquivalent: "")
             item.target = self; item.representedObject = m.0; menu.addItem(item)
         }
         if models.isEmpty { let i = NSMenuItem(title: "No models in ~/.models/", action: nil, keyEquivalent: ""); i.isEnabled = false; menu.addItem(i) }
@@ -266,12 +268,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var modelLoaded: Bool = false
 
     @objc func unload() {
-        // Send SIGUSR1 to trigger model unload (llama-server feature)
-        if let task = serverTask {
-            let _ = shell("kill -USR1 \(task.processIdentifier) 2>/dev/null")
-            modelLoaded = false
-            updateMenu()
-        }
+        // Stop the server entirely (model is freed from RAM)
+        serverTask?.terminate(); serverTask = nil
+        _ = shell("pkill -f llama-server 2>/dev/null"); sleep(1)
+        isRunning = false; modelLoaded = false; updateMenu()
     }
     @objc func openWeb() { NSWorkspace.shared.open(URL(string: "http://127.0.0.1:\(port)")!) }
     @objc func quitApp() { stopServer(); NSApp.terminate(nil) }

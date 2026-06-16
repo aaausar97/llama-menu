@@ -334,14 +334,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func stopServer() {
         let _ = shell("launchctl unload ~/Library/LaunchAgents/com.llama.server.plist 2>/dev/null")
         serverTask?.terminate(); serverTask = nil; stopActivityTimer()
-        let _ = shell("pkill -f llama-server 2>/dev/null"); sleep(1)
+        let _ = shell("pkill -f llama-server 2>/dev/null")
         isRunning = false; updateMenu()
+        // Give OS time to free the port before restart
+        DispatchQueue.global().async { sleep(2); DispatchQueue.main.async { [weak self] in self?.updateMenu() } }
     }
 
-    @objc func restartServer() { stopServer(); DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in self?.startServer() } }
+    @objc func restartServer() {
+        stopServer()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in self?.startServer() }
+    }
 
     @objc func unloadModel() {
-        if let task = serverTask { let _ = shell("kill -USR1 \(task.processIdentifier) 2>/dev/null"); sleep(1) }
+        if let task = serverTask { let _ = shell("kill -USR1 \(task.processIdentifier) 2>/dev/null") }
     }
 
     @objc func viewLogs() { NSWorkspace.shared.open(URL(fileURLWithPath: "\(NSHomeDirectory())/.llama-server-error.log")) }

@@ -90,7 +90,14 @@ cmd_list() {
 
     while IFS='|' read -r name size; do
         [[ -z "$name" ]] && continue
-        local hsize=$(numfmt --to=iec-i --suffix=B "$size" 2>/dev/null || echo "${size}B")
+        local hsize
+        if [ "$size" -ge 1000000000 ]; then
+            hsize=$(echo "$size" | awk '{printf "%.1f GB", $1/1000000000}')
+        elif [ "$size" -ge 1000000 ]; then
+            hsize=$(echo "$size" | awk '{printf "%.0f MB", $1/1000000}')
+        else
+            hsize=$(echo "$size" | awk '{printf "%.0f KB", $1/1000}')
+        fi
         local status="—"
         [[ "$name" == "$current" ]] && status="● running"
         printf "%-50s %10s %12s\n" "$name" "$hsize" "$status"

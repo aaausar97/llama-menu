@@ -8,7 +8,7 @@ import Foundation
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var serverTask: Process?
-    var currentModel: String = "qwen9"
+    var currentModel: String = "Qwen_Qwen3.5-9B-Q4_K_M.gguf"
     var isRunning: Bool = false
     var lastActivity: Date = Date()
     var activityTimer: Timer?
@@ -294,7 +294,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func startServer() {
         guard !isRunning else { return }
-        let modelPath = "\(modelsDir)/\(currentModel)"
+        var modelPath = "\(modelsDir)/\(currentModel)"
+        // If current model doesn't exist, pick first available
+        if !FileManager.default.fileExists(atPath: modelPath) {
+            let models = scanModels()
+            if let first = models.first {
+                currentModel = first.file
+                modelPath = "\(modelsDir)/\(currentModel)"
+            } else {
+                showAlert("No models found", "Download a model first:\nmodels download qwen9"); return
+            }
+        }
         guard FileManager.default.fileExists(atPath: modelPath) else {
             showAlert("Model not found", "File: \(modelPath)\n\nDownload a model first:\nmodels download qwen9"); return
         }

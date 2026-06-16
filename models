@@ -181,14 +181,17 @@ cmd_serve() {
     fi
 
     # Build flags
+    local ctx_size="${CTX_SIZE:-16384}"
+    local kv_cache="${KV_CACHE:-q8_0}"
+
     local flags=(
         -m "$model_file"
         -ngl 99
-        --ctx-size 16384
+        --ctx-size "$ctx_size"
         --batch-size 512
         --threads 8
-        --cache-type-k q8_0
-        --cache-type-v q8_0
+        --cache-type-k "$kv_cache"
+        --cache-type-v "$kv_cache"
         -fa auto
         --tools all
         --jinja

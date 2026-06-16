@@ -13,11 +13,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var customFlags: [String] = []
     var useCustomFlags: Bool = false
 
+    // Configurable options
+    var contextSize: Int = 16384
+    var kvCacheType: String = "q8_0"
+
     let modelRegistry: [(alias: String, name: String, file: String)] = [
         ("qwen9",   "Qwen3.5-9B-Instruct",     "Qwen_Qwen3.5-9B-Q4_K_M.gguf"),
         ("gemma12", "Gemma 4 12B Instruct",     "gemma-4-12B-it-Q4_K_M.gguf"),
         ("gemma26", "Gemma 4 26B-A4B",          "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"),
         ("draft",   "Qwen3.5-0.8B (draft)",     "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf"),
+    ]
+
+    let contextOptions: [(label: String, value: Int)] = [
+        ("4K", 4096),
+        ("8K", 8192),
+        ("16K", 16384),
+        ("32K", 32768),
+        ("64K", 65536),
+        ("128K", 131072),
+    ]
+
+    let kvCacheOptions: [(label: String, value: String)] = [
+        ("F16 (best quality)", "f16"),
+        ("Q8_0 (balanced)", "q8_0"),
+        ("Q4_K_S (smallest)", "q4_k_s"),
+        ("Q4_K_M", "q4_k_m"),
+        ("Q5_K_M", "q5_k_m"),
     ]
 
     let modelsDir = "\(NSHomeDirectory())/.models"
@@ -28,7 +49,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
-            // Larger font = tighter relative margins
             button.title = "🤖"
             button.font = NSFont.systemFont(ofSize: 14)
             button.toolTip = "llama.cpp server"
@@ -85,6 +105,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Context size submenu
+        let ctxMenu = NSMenu(title: "Context Size")
+        for opt in contextOptions {
+            let checkmark = (contextSize == opt.value) ? " ✓" : ""
+            let item = NSMenuItem(title: "\(opt.label)\(checkmark)", action: #selector(setContextSize(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = opt.value
+            ctxMenu.addItem(item)
+        }
+        let ctxItem = NSMenuItem(title: "Context Size: \(formatContext(contextSize))", action: nil, keyEquivalent: "")
+        ctxItem.submenu = ctxMenu
+        menu.addItem(ctxItem)
+
+        // KV cache submenu
+        let kvMenu = NSMenu(title: "KV Cache Type")
+        for opt in kvCacheOptions {
+            let checkmark = (kvCacheType == opt.value) ? " ✓" : ""
+            let item = NSMenuItem(title: "\(opt.label)\(checkmark)", action: #selector(setKVCache(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = opt.value
+            kvMenu.addItem(item)
+        }
+        let kvItem = NSMenuItem(title: "KV Cache: \(kvCacheType)", action: nil, keyEquivalent: "")
+        kvItem.submenu = kvMenu
+        menu.addItem(kvItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         // Custom command
         let customTitle = useCustomFlags ? "⚡ Custom: ON" : "Custom Command..."
         let customItem = NSMenuItem(title: customTitle, action: #selector(showCustomCommand), keyEquivalent: "e")
@@ -99,7 +147,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Unload model (free RAM, keep server running)
+        // Unload model
         let unloadItem = NSMenuItem(title: "Unload Model", action: #selector(unloadModel), keyEquivalent: "u")
         unloadItem.target = self
         unloadItem.isEnabled = isRunning
@@ -148,12 +196,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem.menu = menu
     }
 
+    func formatContext(_ val: Int) -> String {
+        if val >= 1024 { return "\(val / 1024)K" }
+        return "\(val)"
+    }
+
     @objc func refreshMenu() { updateMenu() }
 
     @objc func switchModel(_ sender: NSMenuItem) {
         guard let alias = sender.representedObject as? String else { return }
         currentModel = alias
         useCustomFlags = false
+        if isRunning { restartServer() } else { updateMenu() }
+    }
+
+    @objc func setContextSize(_ sender: NSMenuItem) {
+        guard let val = sender.representedObject as? Int else { return }
+        contextSize = val
+        if isRunning { restartServer() } else { updateMenu() }
+    }
+
+    @objc func setKVCache(_ sender: NSMenuItem) {
+        guard let val = sender.representedObject as? String else { return }
+        kvCacheType = val
         if isRunning { restartServer() } else { updateMenu() }
     }
 
@@ -164,7 +229,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .informational
 
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 500, height: 60))
-        input.stringValue = "-m /Users/ausarmundra/.models/Qwen_Qwen3.5-9B-Q4_K_M.gguf -ngl 99 --ctx-size 16384 --batch-size 512 --threads 8 --cache-type-k q8_0 --cache-type-v q8_0 -fa auto --tools all --jinja --host 127.0.0.1 --port 11434 --sleep-idle-seconds 180"
+        input.stringValue = "-m /Users/ausarmundra/.models/Qwen_Qwen3.5-9B-Q4_K_M.gguf -ngl 99 --ctx-size 16384 --batch-size 512 --threads 8 --cache-type-k q8_0 --cache-type-v q8_0 -fa auto --tools all --jinja --ui-mcp-proxy --host 127.0.0.1 --port 11434 --sleep-idle-seconds 180"
         input.placeholderString = "-m /path/to/model.gguf -ngl 99 --ctx-size 16384 ..."
         alert.accessoryView = input
 
@@ -203,51 +268,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var current = ""
         var inQuotes = false
         var escaped = false
-
         for char in text {
-            if escaped {
-                current.append(char)
-                escaped = false
-                continue
-            }
-            if char == "\\" {
-                escaped = true
-                continue
-            }
-            if char == "\"" {
-                inQuotes.toggle()
-                continue
-            }
+            if escaped { current.append(char); escaped = false; continue }
+            if char == "\\" { escaped = true; continue }
+            if char == "\"" { inQuotes.toggle(); continue }
             if char == " " && !inQuotes {
-                if !current.isEmpty {
-                    flags.append(current)
-                    current = ""
-                }
+                if !current.isEmpty { flags.append(current); current = "" }
                 continue
             }
             current.append(char)
         }
         if !current.isEmpty { flags.append(current) }
         return flags
-    }
-
-    @objc func unloadModel() {
-        // Send SIGUSR1 to llama-server to trigger model unload (if supported)
-        // Fallback: terminate and restart server without model
-        if let task = serverTask {
-            // Try graceful unload first via signal
-            let pid = task.processIdentifier
-            let _ = shell("kill -USR1 \(pid) 2>/dev/null")
-            sleep(1)
-
-            // Check if model was unloaded (server still running)
-            let health = shell("curl -s --max-time 2 http://127.0.0.1:\(port)/health 2>/dev/null")
-            if health.contains("ok") {
-                isRunning = true
-                updateMenu()
-                return
-            }
-        }
     }
 
     func modelPathForAlias(_ alias: String) -> String {
@@ -283,11 +315,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             flags = [
                 "-m", modelPath,
                 "-ngl", "99",
-                "--ctx-size", "16384",
+                "--ctx-size", "\(contextSize)",
                 "--batch-size", "512",
                 "--threads", "8",
-                "--cache-type-k", "q8_0",
-                "--cache-type-v", "q8_0",
+                "--cache-type-k", kvCacheType,
+                "--cache-type-v", kvCacheType,
                 "-fa", "auto",
                 "--tools", "all",
                 "--jinja",
@@ -333,6 +365,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         stopServer()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             self?.startServer()
+        }
+    }
+
+    @objc func unloadModel() {
+        if let task = serverTask {
+            let pid = task.processIdentifier
+            let _ = shell("kill -USR1 \(pid) 2>/dev/null")
+            sleep(1)
+            let health = shell("curl -s --max-time 2 http://127.0.0.1:\(port)/health 2>/dev/null")
+            if health.contains("ok") {
+                isRunning = true
+                updateMenu()
+                return
+            }
         }
     }
 

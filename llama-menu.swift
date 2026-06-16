@@ -34,7 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let modelRegistry: [(alias: String, name: String, file: String)] = [
         ("qwen9",   "Qwen3.5-9B-Instruct",     "Qwen_Qwen3.5-9B-Q4_K_M.gguf"),
         ("gemma12", "Gemma 4 12B Instruct",     "gemma-4-12B-it-Q4_K_M.gguf"),
-        ("gemma26", "Gemma 4 26B-A4B",          "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"),
+        ("gemma26", "Gemma 4 26B-A4B",          "google_gemma-4-26B-A4B-it-Q4_K_M.gguf"),
         ("draft",   "Qwen3.5-0.8B (draft)",     "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf"),
     ]
 

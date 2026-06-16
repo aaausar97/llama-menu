@@ -21,7 +21,7 @@ MODELS_DIR="$HOME/.models"
 MODEL_REGISTRY=(
     "qwen9|bartowski/Qwen_Qwen3.5-9B-GGUF|Qwen_Qwen3.5-9B-Q4_K_M.gguf|6.0|Qwen3.5-9B-Instruct — best all-round agentic model, tool calling"
     "gemma12|bartowski/gemma-4-12B-it-GGUF|gemma-4-12B-it-Q4_K_M.gguf|8.0|Gemma 4 12B Instruct — coding, 128K context, multimodal"
-    "gemma26|unsloth/gemma-4-26B-A4B-it-GGUF|gemma-4-26B-A4B-it-UD-Q4_K_M.gguf|15.0|Gemma 4 26B-A4B Instruct — MoE, 4B active, best reasoning"
+    "gemma26|bartowski/google_gemma-4-26B-A4B-it-GGUF|google_gemma-4-26B-A4B-it-Q4_K_M.gguf|14.0|Gemma 4 26B-A4B Instruct Q4_K_M — MoE, 4B active, best reasoning"
     "draft|bartowski/Qwen_Qwen3.5-0.8B-GGUF|Qwen_Qwen3.5-0.8B-Q4_K_M.gguf|0.5|Qwen3.5-0.8B Q4_K_M — draft model for speculative decoding"
 )
 
@@ -94,9 +94,24 @@ cmd_download() {
     echo "  File:  $file (~${size}GB)"
     echo ""
 
-    local url="https://huggingface.co/$repo/resolve/main/$file"
-    curl -L --progress-bar -o "$path" "$url"
-    echo "✓ Downloaded: $path"
+    # Use hf CLI for reliable downloads (supports resume, Xet, etc.)
+    # Prefer uvx hf (latest version, handles Xet better), fall back to hf, then curl
+    if command -v uv &> /dev/null; then
+        uvx hf download "$repo" --include "$file" --local-dir "$MODELS_DIR" 2>&1
+    elif command -v hf &> /dev/null; then
+        hf download "$repo" --include "$file" --local-dir "$MODELS_DIR" 2>&1
+    else
+        # Fallback to curl with resume support
+        echo "  (hf CLI not found, using curl)"
+        curl -L -C - -o "$path" "https://huggingface.co/$repo/resolve/main/$file" 2>&1
+    fi
+
+    if [ -f "$path" ]; then
+        echo "✓ Downloaded: $path"
+    else
+        echo "✗ Download failed"
+        return 1
+    fi
 }
 
 cmd_list() {

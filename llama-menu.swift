@@ -316,7 +316,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 "-m", modelPath,
                 "-ngl", "99",
                 "--ctx-size", "\(contextSize)",
-                "--batch-size", "512",
+                "--batch-size", "2048",
+                "--ubatch-size", "2048",
                 "--threads", "8",
                 "--cache-type-k", kvCacheType,
                 "--cache-type-v", kvCacheType,
@@ -324,6 +325,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 "--tools", "all",
                 "--jinja",
                 "--ui-mcp-proxy",
+                "--mlock",
+                "--prio", "2",
                 "--host", "127.0.0.1",
                 "--port", port,
                 "--sleep-idle-seconds", "180"

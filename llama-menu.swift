@@ -219,7 +219,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func switchModel(_ s: NSMenuItem) {
         guard let f = s.representedObject as? String else { return }
         currentModel = f; useCustomFlags = false
-        isRunning ? restartServer() : updateMenu()
+        if isRunning {
+            restartServer()
+        } else {
+            startServer()
+        }
     }
 
     // ─── SERVER CONTROL ─────────────────────────────────────────────────────────

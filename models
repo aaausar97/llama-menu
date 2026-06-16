@@ -19,7 +19,8 @@ MODELS_DIR="$HOME/.models"
 # The Swift menu bar app reads from the same registry.
 # ──────────────────────────────────────────────────────────────────────────────
 MODEL_REGISTRY=(
-    "qwen9|bartowski/Qwen_Qwen3.5-9B-GGUF|Qwen_Qwen3.5-9B-Q4_K_M.gguf|6.0|Qwen3.5-9B-Instruct — best all-round agentic model, tool calling"
+    "qwen9|unsloth/Qwen3.5-9B-GGUF|Qwen3.5-9B-Q4_K_M.gguf|5.3|Qwen3.5-9B-Instruct — best all-round agentic model, tool calling"
+    "qwen9-old|bartowski/Qwen_Qwen3.5-9B-GGUF|Qwen_Qwen3.5-9B-Q4_K_M.gguf|5.7|Qwen3.5-9B-Instruct (bartowski)"
     "gemma12|bartowski/gemma-4-12B-it-GGUF|gemma-4-12B-it-Q4_K_M.gguf|8.0|Gemma 4 12B Instruct — coding, 128K context, multimodal"
     "gemma26|bartowski/google_gemma-4-26B-A4B-it-GGUF|google_gemma-4-26B-A4B-it-Q4_K_M.gguf|14.0|Gemma 4 26B-A4B Instruct Q4_K_M — MoE, 4B active, best reasoning"
     "draft|bartowski/Qwen_Qwen3.5-0.8B-GGUF|Qwen_Qwen3.5-0.8B-Q4_K_M.gguf|0.5|Qwen3.5-0.8B Q4_K_M — draft model for speculative decoding"

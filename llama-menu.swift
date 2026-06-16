@@ -23,7 +23,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var useSpeculative: Bool = false
 
     let knownModels: [String: String] = [
-        "Qwen_Qwen3.5-9B-Q4_K_M.gguf": "Qwen3.5-9B-Instruct",
+        "Qwen3.5-9B-Q4_K_M.gguf": "Qwen3.5-9B-Instruct",
+        "Qwen_Qwen3.5-9B-Q4_K_M.gguf": "Qwen3.5-9B-Instruct (old)",
         "gemma-4-12B-it-Q4_K_M.gguf": "Gemma 4 12B Instruct",
         "google_gemma-4-26B-A4B-it-Q4_K_M.gguf": "Gemma 4 26B-A4B",
     ]

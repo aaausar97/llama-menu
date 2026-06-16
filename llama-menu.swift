@@ -10,10 +10,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var serverTask: Process?
     var currentModel: String = "qwen9"
     var isRunning: Bool = false
+    var lastActivity: Date = Date()
+    var activityTimer: Timer?
     var customFlags: [String] = []
     var useCustomFlags: Bool = false
 
-    // Configurable options
+    // Configurable options with smart defaults
     var contextSize: Int = 16384
     var kvCacheType: String = "q8_0"
     var batchSize: Int = 2048
@@ -29,7 +31,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var minP: Double = 0.05
     var repeatPenalty: Double = 1.1
 
-    // Known model aliases (friendly names for specific filenames)
+    // Known model aliases
     let knownModels: [String: String] = [
         "Qwen_Qwen3.5-9B-Q4_K_M.gguf": "Qwen3.5-9B-Instruct",
         "gemma-4-12B-it-Q4_K_M.gguf": "Gemma 4 12B Instruct",
@@ -90,7 +92,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let models = scanModels()
 
         // Status
-        let statusTitle = isRunning ? "● Running (\(currentModel))" : "○ Stopped"
+        let idleMin = isRunning ? Int(Date().timeIntervalSince(lastActivity) / 60) : 0
+        let idleStr = (isRunning && idleMin > 0) ? " idle \(idleMin)m" : ""
+        let statusTitle = isRunning ? "● Running (\(currentModel))\(idleStr)" : "○ Stopped"
         let statusItem = NSMenuItem(title: statusTitle, action: nil, keyEquivalent: "")
         statusItem.isEnabled = false
         menu.addItem(statusItem)
@@ -312,14 +316,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if repeatPenalty != 1.1 { flags += ["--repeat-penalty", String(format: "%.2f", repeatPenalty)] }
         }
         let task = Process(); task.executableURL = URL(fileURLWithPath: serverBinary); task.arguments = flags
-        do { try task.run(); serverTask = task; isRunning = true; updateMenu()
-            task.terminationHandler = { [weak self] _ in DispatchQueue.main.async { self?.isRunning = false; self?.serverTask = nil; self?.updateMenu() } }
+        do { try task.run(); serverTask = task; isRunning = true; lastActivity = Date(); startActivityTimer(); updateMenu()
+            task.terminationHandler = { [weak self] _ in DispatchQueue.main.async { self?.isRunning = false; self?.serverTask = nil; self?.stopActivityTimer(); self?.updateMenu() } }
         } catch { showAlert("Failed to start server", error.localizedDescription) }
     }
 
     @objc func stopServer() {
         let _ = shell("launchctl unload ~/Library/LaunchAgents/com.llama.server.plist 2>/dev/null")
-        serverTask?.terminate(); serverTask = nil
+        serverTask?.terminate(); serverTask = nil; stopActivityTimer()
         let _ = shell("pkill -f llama-server 2>/dev/null"); sleep(1)
         isRunning = false; updateMenu()
     }
@@ -345,6 +349,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func showAlert(_ title: String, _ message: String) {
         DispatchQueue.main.async { let a = NSAlert(); a.messageText = title; a.informativeText = message; a.alertStyle = .warning; a.runModal() }
     }
+
+    // Activity tracking (llama-swap inspired)
+    func startActivityTimer() {
+        stopActivityTimer()
+        activityTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            let idleSec = Date().timeIntervalSince(self.lastActivity)
+            // Update status with idle time
+            if idleSec > 180 && self.isRunning {
+                // Model will auto-unload via --sleep-idle-seconds
+                // Just update the UI to reflect idle state
+                DispatchQueue.main.async { self.updateMenu() }
+            }
+        }
+    }
+
+    func stopActivityTimer() { activityTimer?.invalidate(); activityTimer = nil }
+    func recordActivity() { lastActivity = Date() }
 
     func parseFlags(_ text: String) -> [String] {
         var flags: [String] = []; var current = ""; var inQuotes = false; var escaped = false

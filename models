@@ -55,8 +55,9 @@ is_downloaded() {
 cmd_download() {
     local alias="$1"
     if [ -z "$alias" ]; then
-        echo "Usage: models download <alias|all>"
-        echo "Available: $(echo "${MODEL_REGISTRY[@]}" | tr ' ' '\n' | cut -d'|' -f1 | tr '\n' ' ')"
+        echo "Usage: models download <alias|all|HF_repo_id>"
+        echo "  Known aliases: $(echo "${MODEL_REGISTRY[@]}" | tr ' ' '\n' | cut -d'|' -f1 | tr '\n' ' ')"
+        echo "  Or use a HF repo ID like: unsloth/Qwen3.5-9B-GGUF"
         return 1
     fi
 
@@ -74,7 +75,55 @@ cmd_download() {
 
     local entry=$(find_entry "$alias")
     if [ -z "$entry" ]; then
+        # Not an alias — check if it looks like a HF repo ID (contains /)
+        if [[ "$alias" == *"/"* ]]; then
+            local repo="$alias"
+            local file=""
+            echo "Not a known alias, trying to download from HF repo: $repo"
+            echo "Attempting to find Q4_K_M quantization..."
+            file=$(curl -sL "https://huggingface.co/api/models/$repo" 2>/dev/null | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    for f in d.get('siblings',[]):
+        n=f.get('rfilename','')
+        if 'Q4_K_M' in n and n.endswith('.gguf'):
+            print(n); sys.exit(0)
+    for f in d.get('siblings',[]):
+        n=f.get('rfilename','')
+        if n.endswith('.gguf'):
+            print(n); sys.exit(0)
+except: pass
+" 2>/dev/null)
+            if [ -z "$file" ]; then
+                echo "✗ Could not find a .gguf file in $repo"
+                return 1
+            fi
+            echo "  Found: $file"
+            local path="$MODELS_DIR/$file"
+            if [ -f "$path" ]; then
+                echo "✓ Already downloaded: $path"
+                return
+            fi
+            echo "Downloading..."
+            if command -v uv &> /dev/null; then
+                uvx hf download "$repo" --include "$file" --local-dir "$MODELS_DIR" 2>&1
+            elif command -v hf &> /dev/null; then
+                hf download "$repo" --include "$file" --local-dir "$MODELS_DIR" 2>&1
+            else
+                curl -L -C - -o "$path" "https://huggingface.co/$repo/resolve/main/$file" 2>&1
+            fi
+            if [ -f "$path" ]; then
+                echo "✓ Downloaded: $path"
+            else
+                echo "✗ Download failed"
+                return 1
+            fi
+            return
+        fi
         echo "✗ Unknown alias: $alias"
+        echo "  Known aliases: $(echo "${MODEL_REGISTRY[@]}" | tr ' ' '\n' | cut -d'|' -f1 | tr '\n' ' ')"
+        echo "  Or use a HF repo ID like: unsloth/Qwen3.5-9B-GGUF"
         return 1
     fi
 
@@ -311,6 +360,7 @@ case "$cmd" in
         echo ""
         echo "  models download all              — download full lineup"
         echo "  models download <alias>          — download specific model"
+        echo "  models download <HF_repo_id>     — download from HF (e.g. unsloth/Qwen3.5-9B-GGUF)"
         echo "  models list                      — show all models + status"
         echo "  models serve <alias> [draft]     — switch to model"
         echo "  models current                   — show running model"

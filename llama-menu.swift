@@ -19,6 +19,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var useMlock: Bool = false
     var useHighPrio: Bool = false
     var useFlashAttn: Bool = true
+    var batchSize: Int = 2048
     var useSpeculative: Bool = false
 
     let knownModels: [String: String] = [
@@ -100,7 +101,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         adv.addItem(NSMenuItem.separator())
 
         // Configurable values with dialogs
-        let bi = NSMenuItem(title: "Batch Size: 2048", action: #selector(advBatch), keyEquivalent: ""); bi.target = self; adv.addItem(bi)
+        let bi = NSMenuItem(title: "Batch Size: \(batchSize)", action: #selector(advBatch), keyEquivalent: ""); bi.target = self; adv.addItem(bi)
         let ki = NSMenuItem(title: "KV Cache: \(kvCacheType)", action: #selector(advKV), keyEquivalent: ""); ki.target = self; adv.addItem(ki)
         let ci = NSMenuItem(title: "Context: \(ctx(contextSize))", action: #selector(advCtx), keyEquivalent: ""); ci.target = self; adv.addItem(ci)
         adv.addItem(NSMenuItem.separator())
@@ -124,7 +125,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let cf = NSMenuItem(title: "Custom Flags...", action: #selector(customCmd), keyEquivalent: "e"); cf.target = self; adv.addItem(cf)
         let rd = NSMenuItem(title: "Reset to Defaults", action: #selector(resetAll), keyEquivalent: ""); rd.target = self; adv.addItem(rd)
 
-        let ai = NSMenuItem(title: "Advanced Settings ▸", action: nil, keyEquivalent: "")
+        let ai = NSMenuItem(title: "Advanced Settings", action: nil, keyEquivalent: "")
         ai.submenu = adv; menu.addItem(ai)
 
         menu.addItem(NSMenuItem.separator())
@@ -166,12 +167,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let a = NSAlert(); a.messageText = "Batch Size"; a.informativeText = "Enter batch size (e.g. 512, 1024, 2048):"
         let i = NSTextField(frame: NSRect(x:0,y:0,width:200,height:24)); i.stringValue = "2048"; a.accessoryView = i
         a.addButton(withTitle: "Save"); a.addButton(withTitle: "Cancel")
-        if a.runModal() == .alertFirstButtonReturn { if let v = Int(i.stringValue), v > 0 { } ; updateMenu() }
+        if a.runModal() == .alertFirstButtonReturn { if let v = Int(i.stringValue), v > 0 { batchSize = v }; if isRunning { restartServer() } else { updateMenu() } }
     }
 
     @objc func advKV() {
         let a = NSAlert(); a.messageText = "KV Cache Type"
-        a.informativeText = "Choose quantization: f16, q8_0, q4_k_s, q4_k_m, q5_k_m"
+        a.informativeText = "Choose: f16, q8_0, q4_k_s, q4_k_m, q5_k_m"
         let i = NSTextField(frame: NSRect(x:0,y:0,width:200,height:24)); i.stringValue = kvCacheType; a.accessoryView = i
         a.addButton(withTitle: "Save"); a.addButton(withTitle: "Cancel")
         if a.runModal() == .alertFirstButtonReturn { kvCacheType = i.stringValue; if isRunning { restartServer() } else { updateMenu() } }
@@ -220,7 +221,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var flags: [String]
         if useCustomFlags && !customFlags.isEmpty { flags = customFlags }
         else {
-            flags = ["-m", mp, "-ngl","99","--ctx-size","\(contextSize)","--threads","8",
+            flags = ["-m", mp, "-ngl","99","--ctx-size","\(contextSize)","--batch-size","\(batchSize)","--ubatch-size","\(batchSize)","--threads","8",
                      "--cache-type-k",kvCacheType,"--cache-type-v",kvCacheType,
                      "--tools","all","--jinja","--ui-mcp-proxy",
                      "--host","127.0.0.1","--port",port,"--sleep-idle-seconds","180"]

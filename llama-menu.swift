@@ -79,7 +79,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Status line
         let idleMin = isRunning ? Int(Date().timeIntervalSince(lastActivity) / 60) : 0
         let idleStr = (isRunning && idleMin > 0) ? " idle \(idleMin)m" : ""
-        menu.addItem(NSMenuItem(title: isRunning ? "● Running (\(currentModel))\(idleStr)" : "○ Stopped", action: nil, keyEquivalent: ""))
+        let modelStr = modelLoaded ? "loaded" : "unloaded"
+        let statusTitle: String
+        if isRunning {
+            statusTitle = modelLoaded ? "● Running (\(currentModel))\(idleStr)" : "● Idle (\(currentModel)) - model unloaded"
+        } else {
+            statusTitle = "○ Stopped"
+        }
+        menu.addItem(NSMenuItem(title: statusTitle, action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
 
         // Main model list (no drafts)
@@ -239,7 +246,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             t.terminationHandler = { [weak self] _ in DispatchQueue.main.async { self?.isRunning = false; self?.serverTask = nil; self?.updateMenu() } }
             DispatchQueue.global().async { [weak self] in
                 for _ in 0..<60 {
-                    if self?.healthy() == true { DispatchQueue.main.async { self?.isRunning = true; self?.updateMenu() }; return }
+                    if self?.healthy() == true { DispatchQueue.main.async { self?.isRunning = true; self?.modelLoaded = true; self?.updateMenu() }; return }
                     sleep(1)
                 }
                 DispatchQueue.main.async { self?.sa("Timeout", "Not responding after 60s") }
@@ -249,14 +256,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func stopServer() {
-        serverTask?.terminate(); serverTask = nil
+        serverTask?.terminate(); serverTask = nil; modelLoaded = false
         _ = shell("pkill -f llama-server 2>/dev/null"); sleep(1)
         isRunning = false; updateMenu()
     }
 
     @objc func restartServer() { stopServer(); DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.startServer() } }
 
-    @objc func unload() { serverTask?.terminate(); serverTask = nil; isRunning = false; updateMenu() }
+    var modelLoaded: Bool = false
+
+    @objc func unload() {
+        // Send SIGUSR1 to trigger model unload (llama-server feature)
+        if let task = serverTask {
+            let _ = shell("kill -USR1 \(task.processIdentifier) 2>/dev/null")
+            modelLoaded = false
+            updateMenu()
+        }
+    }
     @objc func openWeb() { NSWorkspace.shared.open(URL(string: "http://127.0.0.1:\(port)")!) }
     @objc func quitApp() { stopServer(); NSApp.terminate(nil) }
 

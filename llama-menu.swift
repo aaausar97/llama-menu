@@ -100,10 +100,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         adv.addItem(toggleItem("Flash Attention", on: useFlashAttn, action: #selector(tFA)))
         adv.addItem(NSMenuItem.separator())
 
-        // Configurable values with dialogs
-        let bi = NSMenuItem(title: "Batch Size: \(batchSize)", action: #selector(advBatch), keyEquivalent: ""); bi.target = self; adv.addItem(bi)
-        let ki = NSMenuItem(title: "KV Cache: \(kvCacheType)", action: #selector(advKV), keyEquivalent: ""); ki.target = self; adv.addItem(ki)
-        let ci = NSMenuItem(title: "Context: \(ctx(contextSize))", action: #selector(advCtx), keyEquivalent: ""); ci.target = self; adv.addItem(ci)
+        // Configurable values with selectable submenus
+        // Context Size submenu
+        let ctxMenu = NSMenu(title: "Context Size")
+        for opt in [("4K",4096),("8K",8192),("16K",16384),("32K",32768),("64K",65536),("128K",131072)] {
+            let item = NSMenuItem(title: opt.0 + (contextSize == opt.1 ? " ✓" : ""), action: #selector(setCtx(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = opt.1; ctxMenu.addItem(item)
+        }
+        let ctxItem = NSMenuItem(title: "Context: \(ctx(contextSize))", action: nil, keyEquivalent: "")
+        ctxItem.submenu = ctxMenu; adv.addItem(ctxItem)
+
+        // KV Cache submenu
+        let kvMenu = NSMenu(title: "KV Cache")
+        for opt in [("F16","f16"),("Q8_0","q8_0"),("Q4_K_S","q4_k_s"),("Q4_K_M","q4_k_m"),("Q5_K_M","q5_k_m")] {
+            let item = NSMenuItem(title: opt.0 + (kvCacheType == opt.1 ? " ✓" : ""), action: #selector(setKV(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = opt.1; kvMenu.addItem(item)
+        }
+        let kvItem = NSMenuItem(title: "KV Cache: \(kvCacheType)", action: nil, keyEquivalent: "")
+        kvItem.submenu = kvMenu; adv.addItem(kvItem)
+
+        // Batch Size submenu
+        let batchMenu = NSMenu(title: "Batch Size")
+        for opt in [("512",512),("1024",1024),("2048",2048),("4096",4096)] {
+            let item = NSMenuItem(title: "\(opt.1)" + (batchSize == opt.1 ? " ✓" : ""), action: #selector(setBatch(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = opt.1; batchMenu.addItem(item)
+        }
+        let batchItem = NSMenuItem(title: "Batch Size: \(batchSize)", action: nil, keyEquivalent: "")
+        batchItem.submenu = batchMenu; adv.addItem(batchItem)
         adv.addItem(NSMenuItem.separator())
 
         // Speculative decoding (draft models)
@@ -163,28 +186,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // ─── ADVANCED DIALOGS ───────────────────────────────────────────────────────
 
-    @objc func advBatch() {
-        let a = NSAlert(); a.messageText = "Batch Size"; a.informativeText = "Enter batch size (e.g. 512, 1024, 2048):"
-        let i = NSTextField(frame: NSRect(x:0,y:0,width:200,height:24)); i.stringValue = "2048"; a.accessoryView = i
-        a.addButton(withTitle: "Save"); a.addButton(withTitle: "Cancel")
-        if a.runModal() == .alertFirstButtonReturn { if let v = Int(i.stringValue), v > 0 { batchSize = v }; if isRunning { restartServer() } else { updateMenu() } }
-    }
-
-    @objc func advKV() {
-        let a = NSAlert(); a.messageText = "KV Cache Type"
-        a.informativeText = "Choose: f16, q8_0, q4_k_s, q4_k_m, q5_k_m"
-        let i = NSTextField(frame: NSRect(x:0,y:0,width:200,height:24)); i.stringValue = kvCacheType; a.accessoryView = i
-        a.addButton(withTitle: "Save"); a.addButton(withTitle: "Cancel")
-        if a.runModal() == .alertFirstButtonReturn { kvCacheType = i.stringValue; if isRunning { restartServer() } else { updateMenu() } }
-    }
-
-    @objc func advCtx() {
-        let a = NSAlert(); a.messageText = "Context Size"
-        a.informativeText = "Choose: 4096, 8192, 16384, 32768, 65536, 131072"
-        let i = NSTextField(frame: NSRect(x:0,y:0,width:200,height:24)); i.stringValue = "\(contextSize)"; a.accessoryView = i
-        a.addButton(withTitle: "Save"); a.addButton(withTitle: "Cancel")
-        if a.runModal() == .alertFirstButtonReturn { if let v = Int(i.stringValue), v > 0 { contextSize = v }; if isRunning { restartServer() } else { updateMenu() } }
-    }
+    @objc func setCtx(_ s: NSMenuItem) { if let v = s.representedObject as? Int { contextSize = v }; if isRunning { restartServer() } else { updateMenu() } }
+    @objc func setKV(_ s: NSMenuItem) { if let v = s.representedObject as? String { kvCacheType = v }; if isRunning { restartServer() } else { updateMenu() } }
+    @objc func setBatch(_ s: NSMenuItem) { if let v = s.representedObject as? Int { batchSize = v }; if isRunning { restartServer() } else { updateMenu() } }
 
     @objc func resetAll() {
         contextSize = 16384; kvCacheType = "q8_0"; useMlock = false; useHighPrio = false

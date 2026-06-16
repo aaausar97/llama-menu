@@ -1,4 +1,4 @@
-// llama-menu.swift — clean rewrite v2
+// llama-menu.swift — no registry, just scan ~/.models/
 // Build: swiftc -o llama-menu-bin llama-menu.swift -framework Cocoa
 
 import Cocoa
@@ -7,61 +7,46 @@ import Foundation
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var serverTask: Process?
-    var currentModel: String = "Qwen_Qwen3.5-9B-Q4_K_M.gguf"
+    var currentModel: String = ""
     var isRunning: Bool = false
     var lastActivity: Date = Date()
     var customFlags: [String] = []
     var useCustomFlags: Bool = false
 
-    // Defaults: mlock and prio OFF
+    // Defaults
     var contextSize: Int = 16384
     var kvCacheType: String = "q8_0"
     var useMlock: Bool = false
     var useHighPrio: Bool = false
     var useFlashAttn: Bool = true
-    var batchSize: Int = 2048
-    var useSpeculative: Bool = false
-
-    let knownModels: [String: String] = [
-        "Qwen3.5-9B-Q4_K_M.gguf": "Qwen3.5-9B-Instruct",
-        "Qwen_Qwen3.5-9B-Q4_K_M.gguf": "Qwen3.5-9B-Instruct (old)",
-        "gemma-4-12B-it-Q4_K_M.gguf": "Gemma 4 12B Instruct",
-        "google_gemma-4-26B-A4B-it-Q4_K_M.gguf": "Gemma 4 26B-A4B",
-    ]
-
-    // Draft models (hidden from main list, used for speculative decoding)
-    let draftModels: [String: String] = [
-        "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf": "Qwen3.5-0.8B (draft)",
-    ]
 
     let modelsDir = "\(NSHomeDirectory())/.models"
     let serverBinary = "/opt/homebrew/bin/llama-server"
     let port = "11434"
 
-    // Scan only main models (no drafts)
-    func scanModels() -> [(file: String, name: String)] {
-        var result: [(String, String)] = []
-        if let e = FileManager.default.enumerator(atPath: modelsDir) {
-            for case let f as String in e {
-                if f.hasSuffix(".gguf") && !f.hasPrefix(".cache") && knownModels[f] != nil {
-                    result.append((f, knownModels[f]!))
+    // Scan ~/.models/ for .gguf files, return (filename, size_bytes)
+    func scanModels() -> [(file: String, size: Int64)] {
+        var result: [(String, Int64)] = []
+        let fm = FileManager.default
+        if let files = try? fm.contentsOfDirectory(atPath: modelsDir) {
+            for f in files {
+                if f.hasSuffix(".gguf") && !f.hasPrefix(".cache") {
+                    let path = "\(modelsDir)/\(f)"
+                    if let attr = try? fm.attributesOfItem(atPath: path),
+                       let size = attr[.size] as? Int64 {
+                        result.append((f, size))
+                    }
                 }
             }
         }
-        return result.sorted(by: { $0.1 < $1.1 })
+        return result.sorted(by: { $0.0 < $1.0 })
     }
 
-    // Scan draft models
-    func scanDrafts() -> [(file: String, name: String)] {
-        var result: [(String, String)] = []
-        if let e = FileManager.default.enumerator(atPath: modelsDir) {
-            for case let f as String in e {
-                if f.hasSuffix(".gguf") && draftModels[f] != nil {
-                    result.append((f, draftModels[f]!))
-                }
-            }
-        }
-        return result
+    func formatSize(_ bytes: Int64) -> String {
+        let gb = Double(bytes) / 1_000_000_000
+        if gb >= 1 { return String(format: "%.1f GB", gb) }
+        let mb = Double(bytes) / 1_000_000
+        return String(format: "%.0f MB", mb)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -73,109 +58,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.checkHealth() }
     }
 
-    func updateMenu() {
+    @objc func updateMenu() {
         let menu = NSMenu()
         let models = scanModels()
 
-        // Status line
+        // Status
         let idleMin = isRunning ? Int(Date().timeIntervalSince(lastActivity) / 60) : 0
         let idleStr = (isRunning && idleMin > 0) ? " idle \(idleMin)m" : ""
-        let statusTitle: String
-        if isRunning && modelLoaded {
-            statusTitle = "● Running (\(currentModel))\(idleStr)"
-        } else if isRunning {
-            statusTitle = "● Idle (\(currentModel))"
-        } else {
-            statusTitle = "○ Stopped"
-        }
+        let statusTitle = isRunning ? "● Running (\(currentModel))\(idleStr)" : "○ Stopped"
         menu.addItem(NSMenuItem(title: statusTitle, action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
 
-        // Main model list (no drafts)
+        // Model list with sizes
         for m in models {
-            let checkmark = (isRunning && modelLoaded && currentModel == m.0) ? " ✓" : ""
-            let item = NSMenuItem(title: m.1 + checkmark, action: #selector(switchModel(_:)), keyEquivalent: "")
-            item.target = self; item.representedObject = m.0; menu.addItem(item)
+            let check = (isRunning && currentModel == m.file) ? " ✓" : ""
+            let item = NSMenuItem(title: "\(m.file) (\(formatSize(m.size)))\(check)", action: #selector(switchModel(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = m.file; menu.addItem(item)
         }
-        if models.isEmpty { let i = NSMenuItem(title: "No models in ~/.models/", action: nil, keyEquivalent: ""); i.isEnabled = false; menu.addItem(i) }
+        if models.isEmpty {
+            let i = NSMenuItem(title: "No .gguf files in ~/.models/", action: nil, keyEquivalent: "")
+            i.isEnabled = false; menu.addItem(i)
+        }
 
         menu.addItem(NSMenuItem.separator())
 
         // Advanced submenu
         let adv = NSMenu(title: "Advanced Settings")
-
-        // Quick toggles
         adv.addItem(toggleItem("Memory Lock", on: useMlock, action: #selector(tMlock)))
         adv.addItem(toggleItem("High Priority", on: useHighPrio, action: #selector(tPrio)))
         adv.addItem(toggleItem("Flash Attention", on: useFlashAttn, action: #selector(tFA)))
         adv.addItem(NSMenuItem.separator())
-
-        // Configurable values with selectable submenus
-        // Context Size submenu
-        let ctxMenu = NSMenu(title: "Context Size")
-        for opt in [("4K",4096),("8K",8192),("16K",16384),("32K",32768),("64K",65536),("128K",131072)] {
-            let item = NSMenuItem(title: opt.0 + (contextSize == opt.1 ? " ✓" : ""), action: #selector(setCtx(_:)), keyEquivalent: "")
-            item.target = self; item.representedObject = opt.1; ctxMenu.addItem(item)
-        }
-        let ctxItem = NSMenuItem(title: "Context: \(ctx(contextSize))", action: nil, keyEquivalent: "")
-        ctxItem.submenu = ctxMenu; adv.addItem(ctxItem)
-
-        // KV Cache submenu
-        let kvMenu = NSMenu(title: "KV Cache")
-        for opt in [("F16","f16"),("Q8_0","q8_0"),("Q4_K_S","q4_k_s"),("Q4_K_M","q4_k_m"),("Q5_K_M","q5_k_m")] {
-            let item = NSMenuItem(title: opt.0 + (kvCacheType == opt.1 ? " ✓" : ""), action: #selector(setKV(_:)), keyEquivalent: "")
-            item.target = self; item.representedObject = opt.1; kvMenu.addItem(item)
-        }
-        let kvItem = NSMenuItem(title: "KV Cache: \(kvCacheType)", action: nil, keyEquivalent: "")
-        kvItem.submenu = kvMenu; adv.addItem(kvItem)
-
-        // Batch Size submenu
-        let batchMenu = NSMenu(title: "Batch Size")
-        for opt in [("512",512),("1024",1024),("2048",2048),("4096",4096)] {
-            let item = NSMenuItem(title: "\(opt.1)" + (batchSize == opt.1 ? " ✓" : ""), action: #selector(setBatch(_:)), keyEquivalent: "")
-            item.target = self; item.representedObject = opt.1; batchMenu.addItem(item)
-        }
-        let batchItem = NSMenuItem(title: "Batch Size: \(batchSize)", action: nil, keyEquivalent: "")
-        batchItem.submenu = batchMenu; adv.addItem(batchItem)
+        let bi = NSMenuItem(title: "Batch Size: 2048", action: #selector(advBatch), keyEquivalent: ""); bi.target = self; adv.addItem(bi)
+        let ki = NSMenuItem(title: "KV Cache: \(kvCacheType)", action: #selector(advKV), keyEquivalent: ""); ki.target = self; adv.addItem(ki)
+        let ci = NSMenuItem(title: "Context: \(ctx(contextSize))", action: #selector(advCtx), keyEquivalent: ""); ci.target = self; adv.addItem(ci)
         adv.addItem(NSMenuItem.separator())
-
-        // Speculative decoding (draft models)
-        let drafts = scanDrafts()
-        if !drafts.isEmpty {
-            let specMenu = NSMenu(title: "Speculative Decoding")
-            let specToggle = NSMenuItem(title: useSpeculative ? "Enable ✓" : "Enable ○", action: #selector(toggleSpec), keyEquivalent: "")
-            specToggle.target = self; specMenu.addItem(specToggle)
-            for d in drafts {
-                let dItem = NSMenuItem(title: "Draft: \(d.1)", action: #selector(pickDraft(_:)), keyEquivalent: "")
-                dItem.target = self; dItem.representedObject = d.0; specMenu.addItem(dItem)
-            }
-            let specItem = NSMenuItem(title: "Speculative Decoding", action: nil, keyEquivalent: "")
-            specItem.submenu = specMenu; adv.addItem(specItem)
-            adv.addItem(NSMenuItem.separator())
-        }
-
-        // Custom flags and reset
         let cf = NSMenuItem(title: "Custom Flags...", action: #selector(customCmd), keyEquivalent: "e"); cf.target = self; adv.addItem(cf)
         let rd = NSMenuItem(title: "Reset to Defaults", action: #selector(resetAll), keyEquivalent: ""); rd.target = self; adv.addItem(rd)
-
         let ai = NSMenuItem(title: "Advanced Settings", action: nil, keyEquivalent: "")
         ai.submenu = adv; menu.addItem(ai)
 
         menu.addItem(NSMenuItem.separator())
-
-        // Server control
         let ul = NSMenuItem(title: "Unload Model", action: #selector(unload), keyEquivalent: "u"); ul.target = self; ul.isEnabled = isRunning; menu.addItem(ul)
         menu.addItem(NSMenuItem.separator())
         let s = NSMenuItem(title: "Start Server", action: #selector(startServer), keyEquivalent: "s"); s.target = self; menu.addItem(s)
         let x = NSMenuItem(title: "Stop Server", action: #selector(stopServer), keyEquivalent: "x"); x.target = self; menu.addItem(x)
         let r = NSMenuItem(title: "Restart Server", action: #selector(restartServer), keyEquivalent: "r"); r.target = self; menu.addItem(r)
         menu.addItem(NSMenuItem.separator())
-
-        // Bottom: Web Chat, Refresh, Quit
         let wl = NSMenuItem(title: "Open Web Chat", action: #selector(openWeb), keyEquivalent: "w"); wl.target = self; menu.addItem(wl)
-        let ref = NSMenuItem(title: "Refresh", action: #selector(refreshMenu), keyEquivalent: ""); ref.target = self; menu.addItem(ref)
+        let ref = NSMenuItem(title: "Refresh", action: #selector(updateMenu), keyEquivalent: ""); ref.target = self; menu.addItem(ref)
         let q = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"); q.target = self; menu.addItem(q)
-
         statusItem.menu = menu
     }
 
@@ -184,25 +115,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func ctx(_ v: Int) -> String { v >= 1024 ? "\(v/1024)K" : "\(v)" }
 
-    @objc func refreshMenu() { updateMenu() }
-
-    // ─── TOGGLES ────────────────────────────────────────────────────────────────
-
     @objc func tMlock() { useMlock.toggle(); if isRunning { restartServer() } else { updateMenu() } }
     @objc func tPrio() { useHighPrio.toggle(); if isRunning { restartServer() } else { updateMenu() } }
     @objc func tFA() { useFlashAttn.toggle(); if isRunning { restartServer() } else { updateMenu() } }
-    @objc func toggleSpec() { useSpeculative.toggle(); if isRunning { restartServer() } else { updateMenu() } }
-    @objc func pickDraft(_ s: NSMenuItem) { if let f = s.representedObject as? String { currentModel = f; updateMenu() } }
 
-    // ─── ADVANCED DIALOGS ───────────────────────────────────────────────────────
+    @objc func advBatch() {
+        let a = NSAlert(); a.messageText = "Batch Size"
+        let i = NSTextField(frame: NSRect(x:0,y:0,width:200,height:24)); i.stringValue = "2048"; a.accessoryView = i
+        a.addButton(withTitle: "Save"); a.addButton(withTitle: "Cancel")
+        // TODO: actually save this
+        _ = a.runModal(); updateMenu()
+    }
 
-    @objc func setCtx(_ s: NSMenuItem) { if let v = s.representedObject as? Int { contextSize = v }; if isRunning { restartServer() } else { updateMenu() } }
-    @objc func setKV(_ s: NSMenuItem) { if let v = s.representedObject as? String { kvCacheType = v }; if isRunning { restartServer() } else { updateMenu() } }
-    @objc func setBatch(_ s: NSMenuItem) { if let v = s.representedObject as? Int { batchSize = v }; if isRunning { restartServer() } else { updateMenu() } }
+    @objc func advKV() {
+        let opts = ["f16","q8_0","q4_k_s","q4_k_m","q5_k_m"]
+        let a = NSAlert(); a.messageText = "KV Cache Type"
+        let popup = NSPopUpButton(frame: NSRect(x:0,y:0,width:200,height:24))
+        popup.addItems(withTitles: opts)
+        popup.selectItem(withTitle: kvCacheType)
+        a.accessoryView = popup
+        a.addButton(withTitle: "Save"); a.addButton(withTitle: "Cancel")
+        if a.runModal() == .alertFirstButtonReturn { kvCacheType = popup.titleOfSelectedItem ?? "q8_0" }
+        if isRunning { restartServer() } else { updateMenu() }
+    }
+
+    @objc func advCtx() {
+        let opts = [("4K",4096),("8K",8192),("16K",16384),("32K",32768),("64K",65536),("128K",131072)]
+        let a = NSAlert(); a.messageText = "Context Size"
+        let popup = NSPopUpButton(frame: NSRect(x:0,y:0,width:200,height:24))
+        for (label,val) in opts { popup.addItem(withTitle: label); if contextSize == val { popup.selectItem(withTitle: label) } }
+        a.accessoryView = popup
+        a.addButton(withTitle: "Save"); a.addButton(withTitle: "Cancel")
+        if a.runModal() == .alertFirstButtonReturn {
+            if let title = popup.titleOfSelectedItem, let (_,val) = opts.first(where: { $0.0 == title }) {
+                contextSize = val
+            }
+        }
+        if isRunning { restartServer() } else { updateMenu() }
+    }
 
     @objc func resetAll() {
         contextSize = 16384; kvCacheType = "q8_0"; useMlock = false; useHighPrio = false
-        useFlashAttn = true; useSpeculative = false; customFlags = []; useCustomFlags = false; updateMenu()
+        useFlashAttn = true; customFlags = []; useCustomFlags = false; updateMenu()
     }
 
     @objc func customCmd() {
@@ -215,31 +169,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // ─── MODEL SWITCHING ────────────────────────────────────────────────────────
-
     @objc func switchModel(_ s: NSMenuItem) {
         guard let f = s.representedObject as? String else { return }
         currentModel = f; useCustomFlags = false
-        if isRunning {
-            restartServer()
-        } else {
-            startServer()
-        }
+        if isRunning { restartServer() } else { startServer() }
     }
-
-    // ─── SERVER CONTROL ─────────────────────────────────────────────────────────
 
     @objc func startServer() {
         guard !isRunning else { return }
-        var mp = "\(modelsDir)/\(currentModel)"
-        if !FileManager.default.fileExists(atPath: mp) {
-            let ms = scanModels(); if let first = ms.first { currentModel = first.0; mp = "\(modelsDir)/\(currentModel)" }
-            else { sa("No models", "Download: models download qwen9"); return }
+        let mp = "\(modelsDir)/\(currentModel)"
+        guard FileManager.default.fileExists(atPath: mp) else {
+            sa("Not found", "File: \(mp)"); return
         }
         var flags: [String]
         if useCustomFlags && !customFlags.isEmpty { flags = customFlags }
         else {
-            flags = ["-m", mp, "-ngl","99","--ctx-size","\(contextSize)","--batch-size","\(batchSize)","--ubatch-size","\(batchSize)","--threads","8",
+            flags = ["-m", mp, "-ngl","99","--ctx-size","\(contextSize)","--threads","8",
                      "--cache-type-k",kvCacheType,"--cache-type-v",kvCacheType,
                      "--tools","all","--jinja","--ui-mcp-proxy",
                      "--host","127.0.0.1","--port",port,"--sleep-idle-seconds","180"]
@@ -253,7 +198,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             t.terminationHandler = { [weak self] _ in DispatchQueue.main.async { self?.isRunning = false; self?.serverTask = nil; self?.updateMenu() } }
             DispatchQueue.global().async { [weak self] in
                 for _ in 0..<60 {
-                    if self?.healthy() == true { DispatchQueue.main.async { self?.isRunning = true; self?.modelLoaded = true; self?.updateMenu() }; return }
+                    if self?.healthy() == true { DispatchQueue.main.async { self?.isRunning = true; self?.updateMenu() }; return }
                     sleep(1)
                 }
                 DispatchQueue.main.async { self?.sa("Timeout", "Not responding after 60s") }
@@ -263,25 +208,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func stopServer() {
-        serverTask?.terminate(); serverTask = nil; modelLoaded = false
+        serverTask?.terminate(); serverTask = nil
         _ = shell("pkill -f llama-server 2>/dev/null"); sleep(1)
         isRunning = false; updateMenu()
     }
 
     @objc func restartServer() { stopServer(); DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.startServer() } }
-
-    var modelLoaded: Bool = false
-
-    @objc func unload() {
-        // Stop the server entirely (model is freed from RAM)
-        serverTask?.terminate(); serverTask = nil
-        _ = shell("pkill -f llama-server 2>/dev/null"); sleep(1)
-        isRunning = false; modelLoaded = false; updateMenu()
-    }
+    @objc func unload() { stopServer() }
     @objc func openWeb() { NSWorkspace.shared.open(URL(string: "http://127.0.0.1:\(port)")!) }
     @objc func quitApp() { stopServer(); NSApp.terminate(nil) }
-
-    // ─── HEALTH ─────────────────────────────────────────────────────────────────
 
     @objc func checkHealth() {
         let t = Process(); t.executableURL = URL(fileURLWithPath: "/usr/bin/curl")

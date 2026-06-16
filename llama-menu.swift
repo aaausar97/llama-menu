@@ -19,10 +19,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var useMlock: Bool = false
     var useHighPrio: Bool = false
     var useFlashAttn: Bool = true
+    var useSpeculative: Bool = false
+    var draftModel: String = ""
 
     let modelsDir = "\(NSHomeDirectory())/.models"
     let serverBinary = "/opt/homebrew/bin/llama-server"
     let port = "11434"
+
+    // Models to hide from main list (shown only in speculative decoding)
+    let hiddenModels: Set<String> = [
+        "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
+    ]
 
     // Scan ~/.models/ for .gguf files, return (filename, size_bytes)
     func scanModels() -> [(file: String, size: Int64)] {
@@ -30,7 +37,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let fm = FileManager.default
         if let files = try? fm.contentsOfDirectory(atPath: modelsDir) {
             for f in files {
-                if f.hasSuffix(".gguf") && !f.hasPrefix(".cache") {
+                if f.hasSuffix(".gguf") && !f.hasPrefix(".cache") && !hiddenModels.contains(f) {
                     let path = "\(modelsDir)/\(f)"
                     if let attr = try? fm.attributesOfItem(atPath: path),
                        let size = attr[.size] as? Int64 {
@@ -40,6 +47,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return result.sorted(by: { $0.0 < $1.0 })
+    }
+
+    // Scan for hidden/draft models only
+    func scanDrafts() -> [(file: String, size: Int64)] {
+        var result: [(String, Int64)] = []
+        let fm = FileManager.default
+        if let files = try? fm.contentsOfDirectory(atPath: modelsDir) {
+            for f in files {
+                if f.hasSuffix(".gguf") && hiddenModels.contains(f) {
+                    let path = "\(modelsDir)/\(f)"
+                    if let attr = try? fm.attributesOfItem(atPath: path),
+                       let size = attr[.size] as? Int64 {
+                        result.append((f, size))
+                    }
+                }
+            }
+        }
+        return result
     }
 
     func formatSize(_ bytes: Int64) -> String {
@@ -92,6 +117,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let ki = NSMenuItem(title: "KV Cache: \(kvCacheType)", action: #selector(advKV), keyEquivalent: ""); ki.target = self; adv.addItem(ki)
         let ci = NSMenuItem(title: "Context: \(ctx(contextSize))", action: #selector(advCtx), keyEquivalent: ""); ci.target = self; adv.addItem(ci)
         adv.addItem(NSMenuItem.separator())
+
+        // Speculative decoding section
+        let drafts = scanDrafts()
+        if !drafts.isEmpty {
+            let specMenu = NSMenu(title: "Speculative Decoding")
+            let specToggle = NSMenuItem(title: useSpeculative ? "Enable ✓" : "Enable ○", action: #selector(toggleSpec), keyEquivalent: "")
+            specToggle.target = self; specMenu.addItem(specToggle)
+            for d in drafts {
+                let dItem = NSMenuItem(title: "Draft: \(d.0) (\(formatSize(d.1)))", action: #selector(pickDraft(_:)), keyEquivalent: "")
+                dItem.target = self; dItem.representedObject = d.0; specMenu.addItem(dItem)
+            }
+            let specItem = NSMenuItem(title: "Speculative Decoding", action: nil, keyEquivalent: "")
+            specItem.submenu = specMenu; adv.addItem(specItem)
+            adv.addItem(NSMenuItem.separator())
+        }
+
         let cf = NSMenuItem(title: "Custom Flags...", action: #selector(customCmd), keyEquivalent: "e"); cf.target = self; adv.addItem(cf)
         let rd = NSMenuItem(title: "Reset to Defaults", action: #selector(resetAll), keyEquivalent: ""); rd.target = self; adv.addItem(rd)
         let ai = NSMenuItem(title: "Advanced Settings", action: nil, keyEquivalent: "")
@@ -118,6 +159,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func tMlock() { useMlock.toggle(); if isRunning { restartServer() } else { updateMenu() } }
     @objc func tPrio() { useHighPrio.toggle(); if isRunning { restartServer() } else { updateMenu() } }
     @objc func tFA() { useFlashAttn.toggle(); if isRunning { restartServer() } else { updateMenu() } }
+    @objc func toggleSpec() { useSpeculative.toggle(); if isRunning { restartServer() } else { updateMenu() } }
+    @objc func pickDraft(_ s: NSMenuItem) { if let f = s.representedObject as? String { draftModel = f; updateMenu() } }
 
     @objc func advBatch() {
         let a = NSAlert(); a.messageText = "Batch Size"
@@ -156,7 +199,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func resetAll() {
         contextSize = 16384; kvCacheType = "q8_0"; useMlock = false; useHighPrio = false
-        useFlashAttn = true; customFlags = []; useCustomFlags = false; updateMenu()
+        useFlashAttn = true; useSpeculative = false; draftModel = ""; customFlags = []; useCustomFlags = false; updateMenu()
     }
 
     @objc func customCmd() {
@@ -191,6 +234,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if useFlashAttn { flags += ["-fa","auto"] }
             if useMlock { flags += ["--mlock"] }
             if useHighPrio { flags += ["--prio","2"] }
+            if useSpeculative && !draftModel.isEmpty {
+                let draftPath = "\(modelsDir)/\(draftModel)"
+                if FileManager.default.fileExists(atPath: draftPath) {
+                    flags += ["--spec-draft-model", draftPath]
+                    flags += ["--spec-draft-type-k", "q8_0"]
+                    flags += ["--spec-draft-type-v", "q8_0"]
+                    flags += ["--spec-type", "draft-simple"]
+                }
+            }
         }
         let t = Process(); t.executableURL = URL(fileURLWithPath: serverBinary); t.arguments = flags
         do {

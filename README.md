@@ -83,10 +83,12 @@ All models stored in `~/.models/`. Only one model runs at a time.
 |-------|-------|-----------|-----------|----------|
 | `qwen9` | Qwen3.5-9B-Instruct Q4_K_M | 5.7GB | ~6.5GB | Daily driver — agentic, tool calling, coding |
 | `gemma12` | Gemma 4 12B Instruct Q4_K_M | 7.1GB | ~7.5GB | Coding, 128K context, multimodal |
-| `gemma26` | Gemma 4 26B-A4B UD-Q4_K_M | 16GB | ~16GB | Best reasoning, MoE (4B active params) |
+| `gemma26` | Gemma 4 26B-A4B Q4_K_M | 16GB | ~16GB | Best reasoning, MoE (4B active params) |
 | `draft` | Qwen3.5-0.8B Q4_K_M | 553MB | ~0.5GB | Speculative decoding draft model |
 
 ### Downloading Models
+
+Models are downloaded using the `hf` CLI (via `uvx hf`) which handles HuggingFace's Xet storage format, supports resume, and verifies checksums automatically. Falls back to `curl` if `hf` is not available.
 
 ```bash
 # Download all models
@@ -95,6 +97,23 @@ models download all
 # Download individual models
 models download qwen9
 models download gemma12
+models download gemma26
+models download draft
+
+# Check what's downloaded
+models list
+```
+
+**Download priority:** `uvx hf download` → `hf download` → `curl` (fallback)
+
+**Important:** Some models (like Gemma 26B) are stored as Xet files on HuggingFace. The `uvx hf download` command handles these correctly. If you get stuck downloads with plain `hf`, use `uvx hf` instead — it runs the latest version in an isolated environment:
+
+```bash
+# Manual download with uvx hf (if models download fails)
+uvx hf download bartowski/google_gemma-4-26B-A4B-it-GGUF \
+  --include "google_gemma-4-26B-A4B-it-Q4_K_M.gguf" \
+  --local-dir ~/.models
+```
 models download gemma26
 models download draft
 

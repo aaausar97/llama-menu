@@ -1,0 +1,109 @@
+#!/bin/bash
+# llama.sh — Quick control for llama.cpp server
+# Usage:
+#   llama start          — start without speculative decoding
+#   llama start spec     — start WITH speculative decoding (needs draft model)
+#   llama stop           — stop server
+#   llama restart        — restart without speculative
+#   llama restart spec   — restart WITH speculative
+#   llama status         — show server health
+
+set -e
+
+MODEL="/Users/ausarmundra/.models/Qwen_Qwen3.5-9B-Q4_K_M.gguf"
+DRAFT="/Users/ausarmundra/.models/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf"
+COMMON_FLAGS=(
+    -ngl 99
+    --ctx-size 16384
+    --batch-size 512
+    --threads 8
+    --cache-type-k q8_0
+    --cache-type-v q8_0
+    -fa auto
+    --tools all
+    --jinja
+    --host 127.0.0.1
+    --port 11434
+    --sleep-idle-seconds 180
+)
+
+cmd="${1:-status}"
+shift || true
+
+case "$cmd" in
+    start)
+        # Kill any running server
+        launchctl unload ~/Library/LaunchAgents/com.llama.server.plist 2>/dev/null
+        kill $(pgrep -f "llama-server") 2>/dev/null || true
+        sleep 2
+
+        if [ "$1" = "spec" ]; then
+            if [ ! -f "$DRAFT" ]; then
+                echo "✗ Draft model not found: $DRAFT"
+                echo "  Download a small Qwen3.5 GGUF into ~/models/ first"
+                exit 1
+            fi
+            echo "Starting WITH speculative decoding..."
+            echo "  Main:  $(basename $MODEL)"
+            echo "  Draft: $(basename $DRAFT)"
+            /opt/homebrew/bin/llama-server \
+                -m "$MODEL" \
+                --spec-draft-model "$DRAFT" \
+                --spec-draft-type-k q8_0 \
+                --spec-draft-type-v q8_0 \
+                --spec-type draft-simple \
+                "${COMMON_FLAGS[@]}" &
+        else
+            echo "Starting (no speculative decoding)..."
+            /opt/homebrew/bin/llama-server \
+                -m "$MODEL" \
+                "${COMMON_FLAGS[@]}" &
+        fi
+
+        # Wait for server to be ready
+        for i in $(seq 1 15); do
+            if curl -s http://127.0.0.1:11434/health > /dev/null 2>&1; then
+                echo "✓ Server ready on http://127.0.0.1:11434"
+                exit 0
+            fi
+            sleep 1
+        done
+        echo "⚠ Server still loading (model may take a moment)"
+        ;;
+
+    stop)
+        echo "Stopping..."
+        launchctl unload ~/Library/LaunchAgents/com.llama.server.plist 2>/dev/null
+        kill $(pgrep -f "llama-server") 2>/dev/null || true
+        sleep 1
+        echo "✓ Stopped"
+        ;;
+
+    restart)
+        "$0" stop
+        sleep 2
+        "$0" start "$@"
+        ;;
+
+    status)
+        if curl -s http://127.0.0.1:11434/health > /dev/null 2>&1; then
+            PID=$(pgrep -f "llama-server" | head -1)
+            MEM=$(ps -o rss= -p "$PID" 2>/dev/null | awk '{printf "%.0f MB", $1/1024}')
+            echo "✓ Running (PID: $PID, MEM: $MEM)"
+
+            # Check if speculative is active
+            if pgrep -f "llama-server" | head -1 | xargs ps -o args= -p 2>/dev/null | grep -q "spec-draft"; then
+                echo "  Mode: speculative decoding (draft model active)"
+            else
+                echo "  Mode: standard (no draft model)"
+            fi
+        else
+            echo "✗ Not running"
+        fi
+        ;;
+
+    *)
+        echo "Usage: llama start|start spec|stop|restart|restart spec|status"
+        exit 1
+        ;;
+esac

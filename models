@@ -1,0 +1,300 @@
+#!/bin/bash
+# models.sh — Download, list, and serve models for llama.cpp
+# Self-updating: model registry is the single source of truth
+#
+# USAGE:
+#   models download all       — download full recommended lineup
+#   models download <alias>   — download a specific model
+#   models list               — show downloaded models + sizes
+#   models serve <name>       — restart llama-server with a specific model
+#   models current            — show which model is currently loaded
+#   models delete <alias>     — remove a model file
+
+set -e
+
+MODELS_DIR="$HOME/.models"
+
+# ─── MODEL REGISTRY ───────────────────────────────────────────────────────────
+# Add new models here. Format: "alias|repo|filename|size_gb|description"
+# The Swift menu bar app reads from the same registry.
+# ──────────────────────────────────────────────────────────────────────────────
+MODEL_REGISTRY=(
+    "qwen9|bartowski/Qwen_Qwen3.5-9B-GGUF|Qwen_Qwen3.5-9B-Q4_K_M.gguf|6.0|Qwen3.5-9B-Instruct — best all-round agentic model, tool calling"
+    "gemma12|bartowski/gemma-4-12B-it-GGUF|gemma-4-12B-it-Q4_K_M.gguf|8.0|Gemma 4 12B Instruct — coding, 128K context, multimodal"
+    "gemma26|unsloth/gemma-4-26B-A4B-it-GGUF|gemma-4-26B-A4B-it-UD-Q4_K_M.gguf|15.0|Gemma 4 26B-A4B Instruct — MoE, 4B active, best reasoning"
+    "draft|bartowski/Qwen_Qwen3.5-0.8B-GGUF|Qwen_Qwen3.5-0.8B-Q4_K_M.gguf|0.5|Qwen3.5-0.8B Q4_K_M — draft model for speculative decoding"
+)
+
+# ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+get_field() {
+    local entry="$1" field="$2"
+    echo "$entry" | cut -d'|' -f"$field"
+}
+
+find_entry() {
+    local alias="$1"
+    for entry in "${MODEL_REGISTRY[@]}"; do
+        [ "$(get_field "$entry" 1)" = "$alias" ] && echo "$entry" && return
+    done
+}
+
+model_path() {
+    local alias="$1"
+    local entry=$(find_entry "$alias")
+    [ -n "$entry" ] && echo "$MODELS_DIR/$(get_field "$entry" 3)"
+}
+
+is_downloaded() {
+    local path=$(model_path "$1")
+    [ -n "$path" ] && [ -f "$path" ]
+}
+
+# ─── COMMANDS ─────────────────────────────────────────────────────────────────
+
+cmd_download() {
+    local alias="$1"
+    if [ -z "$alias" ]; then
+        echo "Usage: models download <alias|all>"
+        echo "Available: $(echo "${MODEL_REGISTRY[@]}" | tr ' ' '\n' | cut -d'|' -f1 | tr '\n' ' ')"
+        return 1
+    fi
+
+    if [ "$alias" = "all" ]; then
+        echo "=== Downloading all models ==="
+        echo ""
+        for entry in "${MODEL_REGISTRY[@]}"; do
+            cmd_download "$(get_field "$entry" 1)"
+            echo ""
+        done
+        echo "=== Done ==="
+        cmd_list
+        return
+    fi
+
+    local entry=$(find_entry "$alias")
+    if [ -z "$entry" ]; then
+        echo "✗ Unknown alias: $alias"
+        return 1
+    fi
+
+    local repo=$(get_field "$entry" 2)
+    local file=$(get_field "$entry" 3)
+    local size=$(get_field "$entry" 4)
+    local desc=$(get_field "$entry" 5)
+    local path="$MODELS_DIR/$file"
+
+    if [ -f "$path" ]; then
+        echo "✓ $alias already downloaded ($path)"
+        return
+    fi
+
+    echo "Downloading $alias: $desc"
+    echo "  Repo:  $repo"
+    echo "  File:  $file (~${size}GB)"
+    echo ""
+
+    local url="https://huggingface.co/$repo/resolve/main/$file"
+    curl -L --progress-bar -o "$path" "$url"
+    echo "✓ Downloaded: $path"
+}
+
+cmd_list() {
+    echo "=== Downloaded Models ==="
+    printf "%-10s %-8s %-12s %s\n" "ALIAS" "SIZE" "STATUS" "DESCRIPTION"
+    printf "%-10s %-8s %-12s %s\n" "-----" "----" "------" "-----------"
+
+    for entry in "${MODEL_REGISTRY[@]}"; do
+        local alias=$(get_field "$entry" 1)
+        local file=$(get_field "$entry" 3)
+        local desc=$(get_field "$entry" 5)
+        local path="$MODELS_DIR/$file"
+
+        if [ -f "$path" ]; then
+            local size=$(du -h "$path" 2>/dev/null | cut -f1)
+            local current=$(pgrep -f llama-server | head -1 | xargs ps -o args= -p 2>/dev/null | grep -o "\-m [^ ]*" | cut -d' ' -f2)
+            local status="downloaded"
+            [ -n "$current" ] && [ "$(basename "$current")" = "$file" ] && status="● running"
+            printf "%-10s %-8s %-12s %s\n" "$alias" "$size" "$status" "$desc"
+        else
+            printf "%-10s %-8s %-12s %s\n" "$alias" "—" "not downloaded" "$desc"
+        fi
+    done
+
+    echo ""
+    echo "=== Server ==="
+    local pid=$(pgrep -f llama-server | head -1)
+    if [ -n "$pid" ]; then
+        local mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{printf "%.0f MB", $1/1024}')
+        echo "  PID:   $pid"
+        echo "  RAM:   $mem"
+    else
+        echo "  (not running)"
+    fi
+
+    echo ""
+    echo "=== Disk ==="
+    echo "  Models: $(du -sh "$MODELS_DIR" 2>/dev/null | cut -f1)"
+    echo "  Free:   $(df -h / | tail -1 | awk '{print $4}')"
+}
+
+cmd_serve() {
+    local alias="$1"
+    local draft_alias="$2"
+
+    if [ -z "$alias" ]; then
+        echo "Usage: models serve <alias> [draft_alias]"
+        echo "  examples:"
+        echo "    models serve qwen9"
+        echo "    models serve qwen9 draft"
+        echo "    models serve gemma12"
+        echo "    models serve gemma26"
+        return 1
+    fi
+
+    local entry=$(find_entry "$alias")
+    if [ -z "$entry" ]; then
+        echo "✗ Unknown alias: $alias"
+        return 1
+    fi
+
+    local model_file="$MODELS_DIR/$(get_field "$entry" 3)"
+    if [ ! -f "$model_file" ]; then
+        echo "✗ Not downloaded: $alias"
+        echo "  Run: models download $alias"
+        return 1
+    fi
+
+    local draft_file=""
+    if [ -n "$draft_alias" ]; then
+        local draft_entry=$(find_entry "$draft_alias")
+        if [ -z "$draft_entry" ]; then
+            echo "✗ Unknown draft alias: $draft_alias"
+            return 1
+        fi
+        draft_file="$MODELS_DIR/$(get_field "$draft_entry" 3)"
+        if [ ! -f "$draft_file" ]; then
+            echo "✗ Draft not downloaded: $draft_alias"
+            echo "  Run: models download $draft_alias"
+            return 1
+        fi
+    fi
+
+    # Build flags
+    local flags=(
+        -m "$model_file"
+        -ngl 99
+        --ctx-size 16384
+        --batch-size 512
+        --threads 8
+        --cache-type-k q8_0
+        --cache-type-v q8_0
+        -fa auto
+        --tools all
+        --jinja
+        --ui-mcp-proxy
+        --host 127.0.0.1
+        --port 11434
+        --sleep-idle-seconds 180
+    )
+
+    if [ -n "$draft_file" ]; then
+        flags+=(--spec-draft-model "$draft_file")
+        flags+=(--spec-draft-type-k q8_0)
+        flags+=(--spec-draft-type-v q8_0)
+        flags+=(--spec-type draft-simple)
+    fi
+
+    # Update launchd plist (but don't load it — manual start only)
+    cat > ~/Library/LaunchAgents/com.llama.server.plist << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.llama.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/llama-server</string>
+$(for f in "${flags[@]}"; do echo "        <string>$f</string>"; done)
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/ausarmundra/.llama-server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/ausarmundra/.llama-server-error.log</string>
+</dict>
+</plist>
+PLIST
+
+    # Stop existing (but don't use launchd — manual only)
+    launchctl unload ~/Library/LaunchAgents/com.llama.server.plist 2>/dev/null
+    kill $(pgrep -f llama-server) 2>/dev/null || true
+    sleep 2
+
+    if [ -n "$draft_file" ]; then
+        echo "Serving $alias WITH speculative decoding ($draft_alias)..."
+    else
+        echo "Serving $alias..."
+    fi
+
+    nohup /opt/homebrew/bin/llama-server "${flags[@]}" > /dev/null 2>&1 &
+    disown
+
+    for i in $(seq 1 20); do
+        if curl -s http://127.0.0.1:11434/health > /dev/null 2>&1; then
+            echo "✓ Server ready on http://127.0.0.1:11434"
+            echo "  Model: $(basename "$model_file")"
+            return
+        fi
+        sleep 1
+    done
+    echo "⚠ Server still loading, check: tail -f ~/.llama-server-error.log"
+}
+
+cmd_current() {
+    pgrep -f llama-server | head -1 | xargs ps -o args= -p 2>/dev/null || echo "(not running)"
+}
+
+cmd_delete() {
+    local alias="$1"
+    if [ -z "$alias" ]; then
+        echo "Usage: models delete <alias>"
+        return 1
+    fi
+    local path=$(model_path "$alias")
+    if [ -n "$path" ] && [ -f "$path" ]; then
+        rm -f "$path"
+        echo "✓ Deleted: $path"
+    else
+        echo "✗ Not found: $alias"
+    fi
+}
+
+# ─── MAIN ─────────────────────────────────────────────────────────────────────
+
+cmd="${1:-list}"
+shift || true
+
+case "$cmd" in
+    download)   cmd_download "$@" ;;
+    list)       cmd_list ;;
+    serve)      cmd_serve "$@" ;;
+    current)    cmd_current ;;
+    delete)     cmd_delete "$@" ;;
+    *)
+        echo "Usage: models <download|list|serve|current|delete>"
+        echo ""
+        echo "  models download all              — download full lineup"
+        echo "  models download <alias>          — download specific model"
+        echo "  models list                      — show all models + status"
+        echo "  models serve <alias> [draft]     — switch to model"
+        echo "  models current                   — show running model"
+        echo "  models delete <alias>            — remove model"
+        echo ""
+        echo "  Aliases: $(echo "${MODEL_REGISTRY[@]}" | tr ' ' '\n' | cut -d'|' -f1 | tr '\n' ' ')"
+        ;;
+esac

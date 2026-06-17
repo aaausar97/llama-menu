@@ -40,7 +40,7 @@ Advanced Settings
   High Priority: OFF
   Flash Attention: ON
   ▸ Context: 16K        ← pop-out: 4K, 8K, 16K ✓, 32K, 64K, 128K
-  ▸ KV Cache: q8_0      ← pop-out: F16, Q8_0 ✓, Q4_K_S, Q4_K_M, Q5_K_M
+  ▸ KV Cache: q8_0      ← pop-out: F16, Q8_0 ✓, Q4_0, Q4_1, Q5_0, Q5_1, IQ4_NL
   ▸ Batch Size: 2048     ← pop-out: 512, 1024, 2048 ✓, 4096
   ─────────────────────
   ▸ Speculative Decoding
@@ -198,8 +198,8 @@ Applied automatically when you click "Start Server":
 | `-ngl 99` | Offloads all model layers to the Metal GPU. Without this, inference falls back to CPU (100x slower). |
 | `--ctx-size` | Maximum context window. Higher = more memory. 16K is the sweet spot for most tasks. |
 | `--threads 8` | Number of CPU threads. Set to your P-core count (not total cores). |
-| `--cache-type-k/v q8_0` | Quantizes KV cache to 8-bit. Halves KV cache RAM with negligible quality loss. Requires Flash Attention. |
-| `-fa auto` | Enables Metal Flash Attention. Faster prefill, smaller memory per token. Required for KV cache quantization. |
+| `--cache-type-k/v q8_0` | Quantizes KV cache to 8-bit. Halves KV cache RAM with negligible quality loss. Requires Flash Attention. Allowed values: `f16`, `q8_0`, `q4_0`, `q4_1`, `q5_0`, `q5_1`, `iq4_nl`. |
+| `-fa auto` | Enables Metal Flash Attention. Faster prefill, smaller memory per token. **Required** for KV cache quantization to work. |
 | `--tools all` | Enables built-in server-side tools: read_file, write_file, exec_shell, grep_search, file_glob_search, edit_file, apply_diff, get_datetime. |
 | `--jinja` | Enables Jinja template engine. Required for modern model chat templates and function calling. |
 | `--ui-mcp-proxy` | Proxies MCP server connections through llama-server. Fixes CORS errors when connecting MCP servers from the web UI. |

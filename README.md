@@ -117,20 +117,41 @@ Files are saved to `~/.models/` and appear in the menu bar app automatically.
 
 When you switch models in the menu bar app, the server restarts with the new model. **Connected agents like Pi and Claude Code keep working** — they just use the new model on the next request.
 
-### How to use with third-party agents
+### How it works
 
-Point any OpenAI-compatible agent to `http://127.0.0.1:11434/v1`:
+llama-server ignores the `model` field in OpenAI API requests — it always uses whatever model was loaded with `-m`. So agents can send any model name (e.g., `local-model`) and the server uses the currently loaded model.
 
-```bash
-# Pi (configure in ~/.pi/agent/models.json)
-# Already configured — just works
+### Configuring third-party agents
 
-# Claude Code (configure in ~/.claude/settings.json)
-# Already configured — just works
+Point agents to `http://127.0.0.1:11434/v1` and set the model name to anything (e.g., `local-model`):
 
-# OpenRouter / other providers
-# Set base URL to: http://127.0.0.1:11434/v1
+**Pi** (`~/.pi/agent/models.json` and `~/.pi/agent/settings.json`):
+```json
+// models.json — change model id to "local-model"
+{
+  "providers": {
+    "llamacpp": {
+      "baseUrl": "http://127.0.0.1:11434/v1",
+      "models": [{"id": "local-model"}]
+    }
+  }
+}
+
+// settings.json — change defaultModel
+{
+  "defaultModel": "local-model",
+  "defaultProvider": "llamacpp"
+}
 ```
+
+**Claude Code** (`~/.claude/settings.json`):
+```json
+{
+  "model": "local-model"
+}
+```
+
+**OpenRouter / other providers**: Set base URL to `http://127.0.0.1:11434/v1` and model to `local-model`.
 
 When you switch models in the menu bar, the next agent request uses the new model automatically. No need to restart agents.
 

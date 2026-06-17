@@ -151,6 +151,16 @@ Point agents to `http://127.0.0.1:11434/v1` and set the model name to anything (
 }
 ```
 
+**Hermes** (`~/.hermes/config.yaml`):
+```yaml
+providers:
+  llamacpp:
+    api: http://127.0.0.1:11434/v1
+    default_model: local-model
+    models: ["local-model"]
+    name: llama.cpp
+```
+
 **OpenRouter / other providers**: Set base URL to `http://127.0.0.1:11434/v1` and model to `local-model`.
 
 When you switch models in the menu bar, the next agent request uses the new model automatically. No need to restart agents.

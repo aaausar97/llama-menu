@@ -139,7 +139,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // KV Cache submenu
         let kvMenu = NSMenu(title: "KV Cache")
-        for (label,val) in [("F16","f16"),("Q8_0","q8_0"),("Q4_K_S","q4_k_s"),("Q4_K_M","q4_k_m"),("Q5_K_M","q5_k_m")] {
+        for (label,val) in [("F16","f16"),("Q8_0","q8_0"),("Q4_0","q4_0"),("Q4_1","q4_1"),("Q5_0","q5_0"),("Q5_1","q5_1"),("IQ4_NL","iq4_nl")] {
             let item = NSMenuItem(title: label + (kvCacheType == val ? " ✓" : ""), action: #selector(setKV(_:)), keyEquivalent: "")
             item.target = self; item.representedObject = val; kvMenu.addItem(item)
         }

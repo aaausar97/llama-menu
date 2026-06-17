@@ -13,7 +13,7 @@ Custom macOS menu bar app for managing a local llama.cpp server. Built for Apple
 - **One-click model switching** — click any model in the menu to load it
 - **Seamless agent integration** — Pi, Claude Code, and other agents keep working when you swap models (inspired by llama-swap)
 - **Context Size** picker (4K–128K) — pop-out submenu, no typing
-- **KV Cache Type** picker (F16, Q8_0, Q4_K_S, etc.) — pop-out submenu
+- **KV Cache Type** picker (F16, Q8_0, Q4_0, Q4_1, Q5_0, Q5_1, IQ4_NL) — pop-out submenu
 - **Batch Size** picker (512, 1024, 2048, 4096) — pop-out submenu
 - **Memory Lock** and **High Priority** toggles (OFF by default)
 - **Flash Attention** toggle (ON by default)
@@ -70,8 +70,8 @@ Open Web Chat  Refresh  Quit
 brew install --HEAD llama.cpp
 
 # 2. Clone this repo
-git clone https://github.com/aaausar97/llama-menu.git ~/llama-menu-app
-cd ~/llama-menu-app
+git clone https://github.com/aaausar97/llama-menu.git ~/dev/llama-menu
+cd ~/dev/llama-menu
 
 # 3. Run the setup script
 bash setup.sh
@@ -244,7 +244,7 @@ For a 24GB Mac, this sets the limit to ~16GB. This is a **ceiling**, not a reser
 
 ### Quick Settings (always visible in Advanced)
 - **Context Size** — pick 4K, 8K, 16K (default), 32K, 64K, 128K
-- **KV Cache** — pick F16, Q8_0 (default), Q4_K_S, Q4_K_M, Q5_K_M
+- **KV Cache** — pick F16, Q8_0 (default), Q4_0, Q4_1, Q5_0, Q5_1, IQ4_NL
 - **Batch Size** — pick 512, 1024, 2048 (default), 4096
 - **Memory Lock** — toggle --mlock on/off
 - **High Priority** — toggle --prio 2 on/off
@@ -288,7 +288,7 @@ llama status             # Check health + which model is loaded
 ## Building from Source
 
 ```bash
-cd ~/llama-menu-app
+cd ~/dev/llama-menu
 
 # Build the menu bar app
 swiftc -o llama-menu llama-menu.swift -framework Cocoa
@@ -332,7 +332,7 @@ Make sure `--ui-mcp-proxy` is enabled (it is by default).
 
 ### Out of memory
 - Reduce context size (try 8K instead of 16K)
-- Use a more aggressive KV cache quantization (Q4_K_S)
+- Use a more aggressive KV cache quantization (Q4_0)
 - Unload model when not in use (auto-unloads after 3 min idle)
 
 ## References

@@ -2,6 +2,25 @@
 
 Custom macOS menu bar app for managing a local llama.cpp server. Built for Apple Silicon Macs.
 
+## Why llama-menu?
+
+Running local LLMs on macOS shouldn't be complicated. **llama-menu** gives you the ease of Ollama with ~70% less overhead — no background daemon, no abstraction layer, no wasted RAM. Just a lean menu bar app that manages a llama.cpp server directly.
+
+**The problem:** Tools like Ollama and LM Studio are convenient but resource-hungry. They run background processes, use extra RAM for abstraction layers, and limit your control over server flags. On a 24GB MacBook Pro, every gigabyte counts.
+
+**The solution:** llama-menu is a lightweight native macOS app that:
+- Uses **zero background resources** when idle (no daemon, no process)
+- Gives you **direct control** over all llama.cpp server flags through a clean UI
+- **Auto-swaps models** seamlessly — agents like Pi, Claude Code, and Hermes keep working when you switch
+- Scans `~/.models/` automatically — drop in a `.gguf` file and it appears in the menu
+- Applies **Apple Silicon optimizations** out of the box (Flash Attention, KV cache quantization, wired memory)
+
+**Use cases:**
+- **Local AI development** — fast model switching for testing different LLMs
+- **On-premise deployment** — standardized, reproducible local LLM workflow across teams
+- **Agentic coding** — Pi, Claude Code, Cursor all connect seamlessly via OpenAI-compatible API
+- **Privacy-first inference** — everything runs locally, no data leaves your machine
+
 ![Menu Bar](https://img.shields.io/badge/menu%20bar-%F0%9F%A4%96-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)

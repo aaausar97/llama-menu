@@ -21,6 +21,88 @@ scan_models() {
     printf '%s\n' "${result[@]}" | sort
 }
 
+# ─── RESOLVE ───────────────────────────────────────────────────────────────────
+
+# Resolve a user-provided name to a filename in ~/.models/
+# Accepts: HF slug (unsloth/Qwen3.5-9B-GGUF), partial name, or exact filename
+resolve_model() {
+    local target="$1"
+    local dir="$MODELS_DIR"
+
+    # If it contains a /, treat as HF slug — resolve to downloaded filename
+    if [[ "$target" == *"/"* ]]; then
+        local slug_name="${target##*/}"  # e.g. "Qwen3.5-9B-GGUF" or "gemma-4-12B-it-GGUF"
+        # Strip "-GGUF" suffix for matching
+        slug_name="${slug_name%-GGUF}"
+        slug_name="${slug_name%-gguf}"
+        # Try exact match first (filename contains slug name)
+        for f in "$dir"/*.gguf; do
+            [[ -f "$f" ]] || continue
+            local fname=$(basename "$f")
+            if [[ "$fname" == *"$slug_name"* ]]; then
+                echo "$fname"
+                return 0
+            fi
+        done
+        # Fuzzy match: extract key parts (model name + size) from slug
+        # e.g. "gemma-4-12B-it" → match files containing "gemma" AND "12B"
+        local slug_parts=()
+        IFS='-' read -ra slug_parts <<< "$slug_name"
+        local match_score=0
+        local best_match=""
+        for f in "$dir"/*.gguf; do
+            [[ -f "$f" ]] || continue
+            local fname=$(basename "$f")
+            local score=0
+            for part in "${slug_parts[@]}"; do
+                [[ "$part" =~ ^[0-9]+$ ]] && continue  # skip pure numbers
+                [[ "$part" =~ ^[a-z]$ ]] && continue      # skip single chars
+                if [[ "$fname" == *"$part"* ]]; then
+                    ((score++))
+                fi
+            done
+            if [[ $score -gt $match_score ]]; then
+                match_score=$score
+                best_match="$fname"
+            fi
+        done
+        if [[ -n "$best_match" ]] && [[ $match_score -ge 2 ]]; then
+            echo "$best_match"
+            return 0
+        fi
+        echo "✗ No downloaded file matching '$target' found in ~/.models/" >&2
+        return 1
+    fi
+
+    # Exact filename match
+    if [[ -f "$dir/$target" ]]; then
+        echo "$target"
+        return 0
+    fi
+
+    # Partial match
+    local matches=()
+    for f in "$dir"/*.gguf; do
+        [[ -f "$f" ]] || continue
+        local fname=$(basename "$f")
+        if [[ "$fname" == *"$target"* ]]; then
+            matches+=("$fname")
+        fi
+    done
+
+    if [[ ${#matches[@]} -eq 1 ]]; then
+        echo "${matches[0]}"
+        return 0
+    elif [[ ${#matches[@]} -gt 1 ]]; then
+        echo "✗ Multiple matches for '$target':" >&2
+        printf '  %s\n' "${matches[@]}" >&2
+        return 1
+    fi
+
+    echo "✗ Not found: '$target'" >&2
+    return 1
+}
+
 # ─── COMMANDS ─────────────────────────────────────────────────────────────────
 
 cmd_download() {
@@ -121,16 +203,17 @@ cmd_list() {
 
 cmd_serve() {
     local model="$1"
-    [[ -z "$model" ]] && { echo "Usage: models serve <filename>"; cmd_list; return 1; }
+    [[ -z "$model" ]] && { echo "Usage: models serve <filename|HF_slug>"; cmd_list; return 1; }
 
-    local path="$MODELS_DIR/$model"
-    [[ ! -f "$path" ]] && { echo "✗ Not found: $path"; return 1; }
+    local resolved
+    resolved=$(resolve_model "$model") || return 1
+    local path="$MODELS_DIR/$resolved"
 
     # Stop existing
     pkill -f llama-server 2>/dev/null || true
     sleep 2
 
-    echo "Serving: $model"
+    echo "Serving: $resolved"
     nohup llama-server \
         -m "$path" -ngl 99 --ctx-size 16384 --threads 8 \
         --cache-type-k q8_0 --cache-type-v q8_0 \
@@ -148,37 +231,39 @@ cmd_serve() {
     echo "⚠ Still loading, check: tail -f ~/.llama-server-error.log"
 }
 
-cmd_current() {
-    pgrep -f llama-server | head -1 | xargs ps -o args= -p 2>/dev/null || echo "(not running)"
-}
-
 cmd_delete() {
     local model="$1"
-    [[ -z "$model" ]] && { echo "Usage: models delete <filename>"; return 1; }
-    local path="$MODELS_DIR/$model"
-    if [[ -f "$path" ]]; then
-        rm -f "$path"
-        echo "✓ Deleted: $path"
-    else
-        echo "✗ Not found: $model"
-    fi
+    [[ -z "$model" ]] && { echo "Usage: models delete <filename|HF_slug>"; return 1; }
+
+    local resolved
+    resolved=$(resolve_model "$model") || return 1
+    local path="$MODELS_DIR/$resolved"
+
+    rm -f "$path"
+    echo "✓ Deleted: $path ($(du -sh "$path" 2>/dev/null | cut -f1 || echo 'already gone'))"
+}
+
+cmd_current() {
+    pgrep -f llama-server | head -1 | xargs ps -o args= -p 2>/dev/null || echo "(not running)"
 }
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 case "${1:-list}" in
-    download)   cmd_download "$@" ;;
+    download)   cmd_download "$2" ;;
     list)       cmd_list ;;
-    serve)      cmd_serve "$@" ;;
+    serve)      cmd_serve "$2" ;;
     current)    cmd_current ;;
-    delete)     cmd_delete "$@" ;;
+    delete)     cmd_delete "$2" ;;
     *)
         echo "Usage: models <download|list|serve|current|delete>"
         echo ""
         echo "  models download <HF_repo>   — download from HF (e.g. unsloth/Qwen3.5-9B-GGUF)"
         echo "  models list                 — show all models in ~/.models/"
-        echo "  models serve <filename>     — start server with model"
+        echo "  models serve <filename|HF_slug>  — start server with model"
+        echo "  models delete <filename|HF_slug> — remove model file"
         echo "  models current              — show running model"
-        echo "  models delete <filename>    — remove model file"
-        ;;
+        echo ""
+        echo "  Aliases: (any filename or HF slug)"
+
 esac

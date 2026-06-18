@@ -268,13 +268,23 @@ For a 24GB Mac, this sets the limit to ~16GB. This is a **ceiling**, not a reser
 
 ### `models` — Model Management (no registry needed)
 
+All commands accept HF repo IDs, partial names, or exact filenames:
+
 ```bash
 models list                                    # Show all .gguf files in ~/.models/
-models download unsloth/Qwen3.5-9B-GGUF       # Download any HF repo
-models serve Qwen3.5-9B-Q4_K_M.gguf          # Start server with model
+models download unsloth/Qwen3.5-9B-GGUF       # Download any HF repo (auto-detects Q4_K_M)
+models serve Qwen3.5-9B-Q4_K_M.gguf          # Start server with model (by exact name)
+models serve unsloth/Qwen3.5-9B-GGUF          # Start server with model (by HF slug)
+models serve Qwen3.5-9B                       # Start server with model (by partial name)
+models delete Qwen3.5-9B-Q4_K_M.gguf         # Delete model file (by exact name)
+models delete unsloth/Qwen3.5-9B-GGUF         # Delete model file (by HF slug)
 models current                                 # Show running model
-models delete Qwen3.5-9B-Q4_K_M.gguf         # Remove model file
 ```
+
+**Name resolution:** All commands (except `list` and `current`) accept:
+- **HF repo ID** — e.g. `unsloth/Qwen3.5-9B-GGUF` (matched by repo name components)
+- **Partial name** — e.g. `Qwen3.5-9B` (matched by filename substring)
+- **Exact filename** — e.g. `Qwen3.5-9B-Q4_K_M.gguf`
 
 ### `llama` — Server Control
 

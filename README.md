@@ -42,13 +42,14 @@ Running local LLMs on macOS shouldn't be complicated. **llama-menu** gives you t
 - **Unload Model** — stops server, frees RAM
 - **Open Web Chat** — opens `http://127.0.0.1:11434` in browser
 - **Refresh** — re-scans `~/.models/` for new files
+- **Live metrics** — displays rolling average tok/s in the status line (e.g., "● Running (model) ~33 tok/s")
 - Server does NOT auto-start on launch — you control when models load
 - Auto-unloads model from RAM after 3 minutes of idle time
 
 ## Screenshot
 
 ```
-🤖 ● Running (Qwen3.5-9B-Q4_K_M.gguf) idle 3m
+🤖 ● Running (Qwen3.5-9B-Q4_K_M.gguf) ~33 tok/s idle 3m
 ─────────────────────────────────────────────
 Qwen3.5-9B-Q4_K_M.gguf (5.3 GB) ✓
 Qwen_Qwen3.5-9B-Q4_K_M.gguf (5.7 GB)

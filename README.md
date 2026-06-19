@@ -9,13 +9,16 @@ Running local LLMs on macOS shouldn't be complicated. **llama-menu** gives you t
 **The problem:** Tools like Ollama and LM Studio are convenient but resource-hungry. They run background processes, use extra RAM for abstraction layers, and limit your control over server flags. On a 24GB MacBook Pro, every gigabyte counts.
 
 **The solution:** llama-menu is a lightweight native macOS app that:
+
 - Uses **zero background resources** when idle (no daemon, no process)
 - Gives you **direct control** over all llama.cpp server flags through a clean UI
 - **Auto-swaps models** seamlessly — agents like Pi, Claude Code, and Hermes keep working when you switch
 - Scans `~/.models/` automatically — drop in a `.gguf` file and it appears in the menu
 - Applies **Apple Silicon optimizations** out of the box (Flash Attention, KV cache quantization, wired memory)
+- Shows **live performance metrics** — token throughput, generation speed, and more
 
 **Use cases:**
+
 - **Local AI development** — fast model switching for testing different LLMs
 - **On-premise deployment** — standardized, reproducible local LLM workflow across teams
 - **Agentic coding** — Pi, Claude Code, Cursor all connect seamlessly via OpenAI-compatible API
@@ -27,11 +30,12 @@ Running local LLMs on macOS shouldn't be complicated. **llama-menu** gives you t
 
 ## Features
 
-- 🤖 Menu bar icon with live server status + model name + idle time
+- 🤖 Menu bar icon with live status: model name, generation speed, idle time
 - **Zero-config model management** — just drop `.gguf` files into `~/.models/`
 - **One-click model switching** — click any model in the menu to load it
+- **Live performance metrics** — real-time token throughput in status line + detailed metrics submenu
 - **Seamless agent integration** — Pi, Claude Code, and other agents keep working when you swap models (inspired by llama-swap)
-- **Context Size** picker (4K–128K) — pop-out submenu, no typing
+- **Context Size** picker (4K–128K) — pop-out submenu
 - **KV Cache Type** picker (F16, Q8_0, Q4_0, Q4_1, Q5_0, Q5_1, IQ4_NL) — pop-out submenu
 - **Batch Size** picker (512, 1024, 2048, 4096) — pop-out submenu
 - **Memory Lock** and **High Priority** toggles (OFF by default)
@@ -42,17 +46,15 @@ Running local LLMs on macOS shouldn't be complicated. **llama-menu** gives you t
 - **Unload Model** — stops server, frees RAM
 - **Open Web Chat** — opens `http://127.0.0.1:11434` in browser
 - **Refresh** — re-scans `~/.models/` for new files
-- **Live metrics** — displays rolling average tok/s in the status line (e.g., "● Running (model) ~33 tok/s")
 - Server does NOT auto-start on launch — you control when models load
 - Auto-unloads model from RAM after 3 minutes of idle time
 
 ## Screenshot
 
 ```
-🤖 ● Running (Qwen3.5-9B-Q4_K_M.gguf) ~33 tok/s idle 3m
+🤖 ● Qwen3.5-9B-Q4_K_M.gguf ~33 tok/s
 ─────────────────────────────────────────────
 Qwen3.5-9B-Q4_K_M.gguf (5.3 GB) ✓
-Qwen_Qwen3.5-9B-Q4_K_M.gguf (5.7 GB)
 gemma-4-12B-it-Q4_K_M.gguf (7.1 GB)
 google_gemma-4-26B-A4B-it-Q4_K_M.gguf (16 GB)
 ─────────────────────────────────────────────
@@ -66,8 +68,9 @@ Advanced Settings
   ─────────────────────
   ▸ Speculative Decoding
     Enable
-    Draft: Qwen_Qwen3.5-0.8B-Q4_K_M.gguf (553 MB)
+    Draft: Qwen3.5-0.8B-Q4_K_M.gguf (553 MB)
   ▸ Sampling: Standard    ← pop-out: Standard ✓, Reasoning, Creative, Structured
+  📊 Metrics              ← live performance data
   ─────────────────────
   Custom Flags...
   Reset to Defaults
@@ -149,7 +152,6 @@ Point agents to `http://127.0.0.1:11434/v1` and set the model name to anything (
 
 **Pi** (`~/.pi/agent/models.json` and `~/.pi/agent/settings.json`):
 ```json
-// models.json — change model id to "local-model"
 {
   "providers": {
     "llamacpp": {
@@ -158,8 +160,8 @@ Point agents to `http://127.0.0.1:11434/v1` and set the model name to anything (
     }
   }
 }
-
-// settings.json — change defaultModel
+```
+```json
 {
   "defaultModel": "local-model",
   "defaultProvider": "llamacpp"
@@ -183,13 +185,70 @@ providers:
     name: llama.cpp
 ```
 
-**OpenRouter / other providers**: Set base URL to `http://127.0.0.1:11434/v1` and model to `local-model`.
-
 When you switch models in the menu bar, the next agent request uses the new model automatically. No need to restart agents.
 
-### Speculative Decoding
+## Live Performance Metrics
 
-If you have a small draft model in `~/.models/`, it appears under Advanced → Speculative Decoding. Enable it to use the draft model for faster generation. The draft model is automatically hidden from the main model list.
+llama-menu displays real-time performance data with near-zero overhead:
+
+**Status line** (always visible):
+- `● ModelName ~33 tok/s` — actively generating tokens
+- `● ModelName reading...` — processing prompt
+- `● ModelName idle 3m` — loaded but idle
+- `● ModelName loading...` — server starting
+- `○ Stopped` — no server
+
+**Metrics submenu** (Advanced → 📊 Metrics):
+- `Gen: 33 tok/s` — generation throughput
+- `Prompt: 120 tok/s` — prompt processing throughput
+- `Generated: 847 tokens` — total tokens generated this session
+- `Decodes: 971` — total decode iterations
+
+Metrics are polled every 5 seconds from llama-server's native `/metrics` endpoint.
+
+## Menu Bar App Usage
+
+### Status Line
+- **Generating**: `● ModelName ~33 tok/s` — shows live generation speed
+- **Reading**: `● ModelName reading...` — processing prompt input
+- **Ready**: `● ModelName idle 3m` — loaded, waiting for requests
+- **Loading**: `● ModelName loading...` — server starting up
+- **Stopped**: `○ Stopped` — click a model to start
+
+### Quick Settings (always visible in Advanced)
+- **Context Size** — pick 4K, 8K, 16K (default), 32K, 64K, 128K
+- **KV Cache** — pick F16, Q8_0 (default), Q4_0, Q4_1, Q5_0, Q5_1, IQ4_NL
+- **Batch Size** — pick 512, 1024, 2048 (default), 4096
+- **Memory Lock** — toggle --mlock on/off (OFF by default)
+- **High Priority** — toggle --prio 2 on/off (OFF by default)
+- **Flash Attention** — toggle -fa on/off (ON by default)
+
+### Speculative Decoding (hover to expand)
+- Enable/disable toggle
+- Pick draft model from available files in `~/.models/`
+- Requires a small draft model (e.g., Qwen3.5-0.8B)
+
+### Sampling Presets (hover to expand)
+- **Standard** — balanced for general tasks (temp 0.7, top-p 0.9, top-k 40)
+- **Reasoning** — raw sampling for chain-of-thought models (temp 1.0, top-p 1.0, top-k 0). For QwQ, DeepSeek-R1, gpt-oss.
+- **Creative** — DRY + XTC for fiction/roleplay (temp 0.8, top-p 0.95)
+- **Structured** — low temp for JSON/grammar outputs (temp 0.3, top-p 0.7)
+
+### Metrics (hover to expand)
+- Live generation throughput (tok/s)
+- Live prompt processing throughput (tok/s)
+- Total tokens generated
+- Total decode calls
+
+### Server Control
+- **Start Server** — loads model and starts serving
+- **Stop Server** — kills server process, frees RAM
+- **Restart Server** — stop + start (applies new settings)
+- **Unload Model** — stops server, frees model RAM
+
+### Other
+- **Open Web Chat** — opens `http://127.0.0.1:11434` in browser
+- **Refresh** — re-scans `~/.models/` for new files
 
 ## Server Flags Explained
 
@@ -208,6 +267,7 @@ Applied automatically when you click "Start Server":
 --tools all                # Built-in server tools
 --jinja                    # Jinja templates (function calling)
 --ui-mcp-proxy             # MCP server CORS proxy
+--metrics                  # Enable metrics endpoint
 --host 127.0.0.1           # Bind address
 --port 11434               # Port
 --sleep-idle-seconds 180   # Auto-unload after 3 min idle
@@ -225,6 +285,7 @@ Applied automatically when you click "Start Server":
 | `--tools all` | Enables built-in server-side tools: read_file, write_file, exec_shell, grep_search, file_glob_search, edit_file, apply_diff, get_datetime. |
 | `--jinja` | Enables Jinja template engine. Required for modern model chat templates and function calling. |
 | `--ui-mcp-proxy` | Proxies MCP server connections through llama-server. Fixes CORS errors when connecting MCP servers from the web UI. |
+| `--metrics` | Enables the `/metrics` endpoint for live performance monitoring. |
 | `--mlock` | Pins model and KV cache in physical RAM. Prevents macOS from paging to disk. Safe if model uses <70% of RAM. OFF by default. |
 | `--prio 2` | Higher scheduling priority. Reduces chance of inference threads being interrupted. OFF by default. |
 | `--sleep-idle-seconds 180` | Auto-unloads model from RAM after 3 minutes of no requests. Server stays running, model reloads on next request. |
@@ -261,37 +322,6 @@ bash setup-wired-memory.sh
 ```
 
 For a 24GB Mac, this sets the limit to ~16GB. This is a **ceiling**, not a reservation — the GPU only uses what it needs.
-
-## Menu Bar App Usage
-
-### Quick Settings (always visible in Advanced)
-- **Context Size** — pick 4K, 8K, 16K (default), 32K, 64K, 128K
-- **KV Cache** — pick F16, Q8_0 (default), Q4_0, Q4_1, Q5_0, Q5_1, IQ4_NL
-- **Batch Size** — pick 512, 1024, 2048 (default), 4096
-- **Memory Lock** — toggle --mlock on/off
-- **High Priority** — toggle --prio 2 on/off
-- **Flash Attention** — toggle -fa on/off
-
-### Speculative Decoding (hover to expand)
-- Enable/disable toggle
-- Pick draft model from available files in `~/.models/`
-
-### Sampling Presets (hover to expand)
-- **Standard** — balanced for general tasks (temp 0.7, top-p 0.9, top-k 40)
-- **Reasoning** — raw sampling for chain-of-thought models (temp 1.0, top-p 1.0, top-k 0). For QwQ, DeepSeek-R1, gpt-oss.
-- **Creative** — DRY + XTC for fiction/roleplay (temp 0.8, top-p 0.95)
-- **Structured** — low temp for JSON/grammar outputs (temp 0.3, top-p 0.7)
-- Current values shown for Temperature, Top-P, Min-P, Repeat Penalty
-
-### Server Control
-- **Start Server** — loads model and starts serving
-- **Stop Server** — kills server process, frees RAM
-- **Restart Server** — stop + start (applies new settings)
-- **Unload Model** — stops server, frees model RAM
-
-### Other
-- **Open Web Chat** — opens `http://127.0.0.1:11434` in browser
-- **Refresh** — re-scans `~/.models/` for new files
 
 ## Bash Scripts
 
@@ -373,6 +403,10 @@ Make sure `--ui-mcp-proxy` is enabled (it is by default).
 - Reduce context size (try 8K instead of 16K)
 - Use a more aggressive KV cache quantization (Q4_0)
 - Unload model when not in use (auto-unloads after 3 min idle)
+
+### Metrics not showing
+- Make sure the server is started with `--metrics` flag (enabled by default)
+- Check that the server is running: `curl http://127.0.0.1:11434/metrics`
 
 ## References
 

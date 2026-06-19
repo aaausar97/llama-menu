@@ -1,2 +1,8 @@
 .DS_Store
 *.log
+llama-menu-bin
+*.icns
+*.png
+gen-icon.swift
+Modelfile.*
+Icon\r

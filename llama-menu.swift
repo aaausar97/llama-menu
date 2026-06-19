@@ -38,7 +38,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Metrics
     var tokensPerSecond: Double = 0
+    var promptTokensPerSecond: Double = 0
     var totalTokensGenerated: Int = 0
+    var totalPromptTokens: Int = 0
+    var nDecodeCalls: Int = 0
 
     let modelsDir = "\(NSHomeDirectory())/.models"
     let serverBinary = "/opt/homebrew/bin/llama-server"
@@ -124,8 +127,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // ─── METRICS ──────────────────────────────────────────────────────────────────
 
+    func updateMetricsMenu() {
+        // This will be called from updateMenu to refresh metrics display
+        // The actual menu items are updated via tags
+    }
+
     func fetchMetrics() {
-        guard isRunning && modelLoaded else { return }
+        guard isRunning && modelLoaded else {
+            if tokensPerSecond > 0 || promptTokensPerSecond > 0 {
+                tokensPerSecond = 0; promptTokensPerSecond = 0
+                DispatchQueue.main.async { [weak self] in self?.updateMenu() }
+            }
+            return
+        }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
         task.arguments = ["-s", "--max-time", "2", "http://127.0.0.1:\(port)/metrics"]
@@ -138,18 +152,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard task.terminationStatus == 0,
                   let data = try? pipe.fileHandleForReading.readDataToEndOfFile(),
                   let output = String(data: data, encoding: .utf8) else { return }
-            var newTps: Double = 0
+            var newGenTps: Double = 0
+            var newPromptTps: Double = 0
             for line in output.components(separatedBy: "\n") {
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.hasPrefix("llamacpp:predicted_tokens_seconds") {
                     let parts = trimmed.components(separatedBy: " ")
-                    if parts.count >= 2, let val = Double(parts[1]) {
-                        newTps = val
-                    }
+                    if parts.count >= 2, let val = Double(parts[1]) { newGenTps = val }
+                } else if trimmed.hasPrefix("llamacpp:prompt_tokens_seconds") {
+                    let parts = trimmed.components(separatedBy: " ")
+                    if parts.count >= 2, let val = Double(parts[1]) { newPromptTps = val }
+                } else if trimmed.hasPrefix("llamacpp:tokens_predicted_total") {
+                    let parts = trimmed.components(separatedBy: " ")
+                    if parts.count >= 2, let val = Int(parts[1]) { totalTokensGenerated = val }
+                } else if trimmed.hasPrefix("llamacpp:prompt_tokens_total") {
+                    let parts = trimmed.components(separatedBy: " ")
+                    if parts.count >= 2, let val = Int(parts[1]) { totalPromptTokens = val }
+                } else if trimmed.hasPrefix("llamacpp:n_decode_total") {
+                    let parts = trimmed.components(separatedBy: " ")
+                    if parts.count >= 2, let val = Int(parts[1]) { nDecodeCalls = val }
                 }
             }
-            if abs(newTps - tokensPerSecond) > 0.5 {
-                tokensPerSecond = newTps
+            let changed = abs(newGenTps - tokensPerSecond) > 0.5 || abs(newPromptTps - promptTokensPerSecond) > 0.5
+            tokensPerSecond = newGenTps
+            promptTokensPerSecond = newPromptTps
+            if changed {
                 DispatchQueue.main.async { [weak self] in self?.updateMenu() }
             }
         } catch { return }
@@ -177,13 +204,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Status
         let idleMin = isRunning ? Int(Date().timeIntervalSince(lastActivity) / 60) : 0
-        let idleStr = (isRunning && idleMin > 0) ? " idle \(idleMin)m" : ""
-        let tpsStr = (isRunning && modelLoaded && tokensPerSecond > 0) ? String(format: " ~%.0f tok/s", tokensPerSecond) : ""
+        let idleStr = (isRunning && modelLoaded && tokensPerSecond == 0 && promptTokensPerSecond == 0 && idleMin > 0) ? " idle \(idleMin)m" : ""
+        let genTpsStr = (tokensPerSecond > 0) ? String(format: " ~%.0f tok/s", tokensPerSecond) : ""
+        let promptTpsStr = (promptTokensPerSecond > 0) ? String(format: " in: %.0f tok/s", promptTokensPerSecond) : ""
         let statusTitle: String
         if isRunning && modelLoaded {
-            statusTitle = "● Running (\(currentModel))\(idleStr)\(tpsStr)"
+            if tokensPerSecond > 0 || promptTokensPerSecond > 0 {
+                statusTitle = "● Generating (\(currentModel))\(genTpsStr)\(promptTpsStr)"
+            } else {
+                statusTitle = "● Ready (\(currentModel))\(idleStr)"
+            }
         } else if isRunning {
-            statusTitle = "● Idle (\(currentModel))"
+            statusTitle = "● Loading (\(currentModel))"
         } else {
             statusTitle = "○ Stopped"
         }
@@ -269,6 +301,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let samplingItem = NSMenuItem(title: samplingTitle, action: nil, keyEquivalent: "")
         samplingItem.submenu = samplingMenu; adv.addItem(samplingItem)
 
+        // Metrics submenu
+        let metricsMenu = NSMenu(title: "Metrics")
+        let metricsTpsItem = NSMenuItem(title: "Generation: -- tok/s", action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsTpsItem)
+        let metricsPromptItem = NSMenuItem(title: "Prompt: -- tok/s", action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsPromptItem)
+        let metricsTotalItem = NSMenuItem(title: "Total tokens: --", action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsTotalItem)
+        let metricsDecodeItem = NSMenuItem(title: "Decode calls: --", action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsDecodeItem)
+        let metricsItem = NSMenuItem(title: "📊 Metrics", action: nil, keyEquivalent: "")
+        metricsItem.submenu = metricsMenu; adv.addItem(metricsItem)
+
         adv.addItem(NSMenuItem.separator())
         let cf = NSMenuItem(title: "Custom Flags...", action: #selector(customCmd), keyEquivalent: "e"); cf.target = self; adv.addItem(cf)
         let rd = NSMenuItem(title: "Reset to Defaults", action: #selector(resetAll), keyEquivalent: ""); rd.target = self; adv.addItem(rd)
@@ -310,7 +351,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func resetAll() {
         contextSize = 16384; kvCacheType = "q8_0"; useMlock = false; useHighPrio = false
         useFlashAttn = true; useSpeculative = false; draftModel = ""; customFlags = []; useCustomFlags = false
-        applySamplingPreset("standard"); tokensPerSecond = 0; totalTokensGenerated = 0
+        applySamplingPreset("standard"); tokensPerSecond = 0; promptTokensPerSecond = 0; totalTokensGenerated = 0; totalPromptTokens = 0; nDecodeCalls = 0
         updateMenu()
     }
 
@@ -385,7 +426,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func stopServer() {
-        serverTask?.terminate(); serverTask = nil; modelLoaded = false; tokensPerSecond = 0; totalTokensGenerated = 0
+        serverTask?.terminate(); serverTask = nil; modelLoaded = false; tokensPerSecond = 0; promptTokensPerSecond = 0; totalTokensGenerated = 0; totalPromptTokens = 0; nDecodeCalls = 0
         _ = shell("pkill -f llama-server 2>/dev/null"); sleep(1)
         isRunning = false; updateMenu()
     }

@@ -125,6 +125,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // ─── METRICS ──────────────────────────────────────────────────────────────────
 
     func fetchMetrics() {
+        guard isRunning && modelLoaded else { return }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
         task.arguments = ["-s", "--max-time", "2", "http://127.0.0.1:\(port)/metrics"]
@@ -137,19 +138,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard task.terminationStatus == 0,
                   let data = try? pipe.fileHandleForReading.readDataToEndOfFile(),
                   let output = String(data: data, encoding: .utf8) else { return }
+            var newTps: Double = 0
             for line in output.components(separatedBy: "\n") {
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.hasPrefix("llamacpp:predicted_tokens_seconds") {
                     let parts = trimmed.components(separatedBy: " ")
                     if parts.count >= 2, let val = Double(parts[1]) {
-                        tokensPerSecond = val
-                    }
-                } else if trimmed.hasPrefix("llamacpp:tokens_predicted_total") {
-                    let parts = trimmed.components(separatedBy: " ")
-                    if parts.count >= 2, let val = Int(parts[1]) {
-                        totalTokensGenerated = val
+                        newTps = val
                     }
                 }
+            }
+            if abs(newTps - tokensPerSecond) > 0.5 {
+                tokensPerSecond = newTps
+                DispatchQueue.main.async { [weak self] in self?.updateMenu() }
             }
         } catch { return }
     }

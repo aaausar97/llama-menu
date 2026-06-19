@@ -1,4 +1,4 @@
-// llama-menu.swift — clean v3
+// llama-menu.swift — clean v4 (with sampling presets)
 // Build: swiftc -o llama-menu-bin llama-menu.swift -framework Cocoa
 
 import Cocoa
@@ -22,6 +22,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var useFlashAttn: Bool = true
     var useSpeculative: Bool = false
     var draftModel: String = ""
+
+    // Sampling presets
+    var samplingPreset: String = "standard"
+    var temperature: Double = 0.7
+    var topP: Double = 0.9
+    var topK: Int = 40
+    var minP: Double = 0.05
+    var repeatPenalty: Double = 1.1
+    var dryMultiplier: Double = 0.8
+    var dryBase: Double = 1.75
+    var dryAllowedLength: Int = 2
+    var xtcProbability: Double = 0.5
+    var xtcThreshold: Double = 0.1
 
     let modelsDir = "\(NSHomeDirectory())/.models"
     let serverBinary = "/opt/homebrew/bin/llama-server"
@@ -76,6 +89,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func ctx(_ v: Int) -> String { v >= 1024 ? "\(v/1024)K" : "\(v)" }
+
+    // ─── SAMPLING PRESETS ─────────────────────────────────────────────────────────
+
+    func applySamplingPreset(_ preset: String) {
+        samplingPreset = preset
+        switch preset {
+        case "standard":
+            temperature = 0.7; topP = 0.9; topK = 40; minP = 0.05; repeatPenalty = 1.1
+            dryMultiplier = 0.8; dryBase = 1.75; xtcProbability = 0.5; xtcThreshold = 0.1
+        case "reasoning":
+            temperature = 1.0; topP = 1.0; topK = 0; minP = 0.0; repeatPenalty = 1.0
+            dryMultiplier = 0.8; dryBase = 1.75; xtcProbability = 0.5; xtcThreshold = 0.1
+        case "creative":
+            temperature = 0.8; topP = 0.95; topK = 40; minP = 0.02; repeatPenalty = 1.15
+            dryMultiplier = 0.8; dryBase = 1.75; dryAllowedLength = 2; xtcProbability = 0.5; xtcThreshold = 0.1
+        case "structured":
+            temperature = 0.3; topP = 0.7; topK = 20; minP = 0.1; repeatPenalty = 1.0
+            dryMultiplier = 0.8; dryBase = 1.75; xtcProbability = 0.5; xtcThreshold = 0.1
+        default: break
+        }
+    }
+
+    func hasSamplingOverrides() -> Bool {
+        if samplingPreset != "standard" { return true }
+        if temperature != 0.7 || topP != 0.9 || topK != 40 || minP != 0.05 || repeatPenalty != 1.1 { return true }
+        if dryMultiplier != 0.8 || dryBase != 1.75 || xtcProbability != 0.5 || xtcThreshold != 0.1 { return true }
+        return false
+    }
 
     // ─── LIFECYCLE ───────────────────────────────────────────────────────────────
 
@@ -170,6 +211,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             specItem.submenu = specMenu; adv.addItem(specItem)
         }
 
+        // Sampling presets
+        adv.addItem(NSMenuItem.separator())
+        let samplingMenu = NSMenu(title: "Sampling Presets")
+        for (label, preset) in [("Standard", "standard"), ("Reasoning", "reasoning"), ("Creative", "creative"), ("Structured", "structured")] {
+            let check = (samplingPreset == preset) ? " ✓" : ""
+            let item = NSMenuItem(title: label + check, action: #selector(setSamplingPreset(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = preset; samplingMenu.addItem(item)
+        }
+        samplingMenu.addItem(NSMenuItem.separator())
+        let _ = samplingMenu.addItem(NSMenuItem(title: "Temperature: \(temperature)", action: nil, keyEquivalent: ""))
+        let _ = samplingMenu.addItem(NSMenuItem(title: "Top-P: \(topP)", action: nil, keyEquivalent: ""))
+        let _ = samplingMenu.addItem(NSMenuItem(title: "Min-P: \(minP)", action: nil, keyEquivalent: ""))
+        let _ = samplingMenu.addItem(NSMenuItem(title: "Repeat Penalty: \(repeatPenalty)", action: nil, keyEquivalent: ""))
+        let samplingTitle = "Sampling: " + samplingPreset.capitalized
+        let samplingItem = NSMenuItem(title: samplingTitle, action: nil, keyEquivalent: "")
+        samplingItem.submenu = samplingMenu; adv.addItem(samplingItem)
+
         adv.addItem(NSMenuItem.separator())
         let cf = NSMenuItem(title: "Custom Flags...", action: #selector(customCmd), keyEquivalent: "e"); cf.target = self; adv.addItem(cf)
         let rd = NSMenuItem(title: "Reset to Defaults", action: #selector(resetAll), keyEquivalent: ""); rd.target = self; adv.addItem(rd)
@@ -207,9 +265,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func setKV(_ s: NSMenuItem) { if let v = s.representedObject as? String { kvCacheType = v }; if isRunning { restartServer() } else { updateMenu() } }
     @objc func setBatch(_ s: NSMenuItem) { if let v = s.representedObject as? Int { _ = v }; if isRunning { restartServer() } else { updateMenu() } }
 
+    @objc func setSamplingPreset(_ s: NSMenuItem) {
+        if let preset = s.representedObject as? String {
+            applySamplingPreset(preset)
+        }
+        if isRunning { restartServer() } else { updateMenu() }
+    }
+
     @objc func resetAll() {
         contextSize = 16384; kvCacheType = "q8_0"; useMlock = false; useHighPrio = false
-        useFlashAttn = true; useSpeculative = false; draftModel = ""; customFlags = []; useCustomFlags = false; updateMenu()
+        useFlashAttn = true; useSpeculative = false; draftModel = ""; customFlags = []; useCustomFlags = false
+        applySamplingPreset("standard")
+        updateMenu()
     }
 
     @objc func customCmd() {
@@ -250,6 +317,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let dp = "\(modelsDir)/\(draftModel)"
                 if FileManager.default.fileExists(atPath: dp) {
                     flags += ["--spec-draft-model", dp, "--spec-draft-type-k", "q8_0", "--spec-draft-type-v", "q8_0", "--spec-type", "draft-simple"]
+                }
+            }
+            // Sampling flags (only add if non-default or preset is active)
+            if hasSamplingOverrides() || samplingPreset != "standard" {
+                flags += ["--temp", String(format: "%.2f", temperature)]
+                flags += ["--top-p", String(format: "%.2f", topP)]
+                flags += ["--top-k", "\(topK)"]
+                flags += ["--min-p", String(format: "%.2f", minP)]
+                flags += ["--repeat-penalty", String(format: "%.2f", repeatPenalty)]
+                if samplingPreset == "creative" {
+                    flags += ["--dry-multiplier", String(format: "%.2f", dryMultiplier)]
+                    flags += ["--dry-base", String(format: "%.2f", dryBase)]
+                    flags += ["--dry-allowed-length", "\(dryAllowedLength)"]
+                    flags += ["--xtc-probability", String(format: "%.2f", xtcProbability)]
+                    flags += ["--xtc-threshold", String(format: "%.2f", xtcThreshold)]
                 }
             }
         }

@@ -1,4 +1,4 @@
-// llama-menu.swift — clean v4 (with sampling presets)
+// llama-menu.swift — clean v5 (with metrics)
 // Build: swiftc -o llama-menu-bin llama-menu.swift -framework Cocoa
 
 import Cocoa
@@ -35,6 +35,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var dryAllowedLength: Int = 2
     var xtcProbability: Double = 0.5
     var xtcThreshold: Double = 0.1
+
+    // Metrics
+    var tokensPerSecond: Double = 0
+    var totalTokensGenerated: Int = 0
 
     let modelsDir = "\(NSHomeDirectory())/.models"
     let serverBinary = "/opt/homebrew/bin/llama-server"
@@ -118,6 +122,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    // ─── METRICS ──────────────────────────────────────────────────────────────────
+
+    func fetchMetrics() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+        task.arguments = ["-s", "--max-time", "2", "http://127.0.0.1:\(port)/metrics"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = pipe
+        do {
+            try task.run()
+            task.waitUntilExit()
+            guard task.terminationStatus == 0,
+                  let data = try? pipe.fileHandleForReading.readDataToEndOfFile(),
+                  let output = String(data: data, encoding: .utf8) else { return }
+            for line in output.components(separatedBy: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.hasPrefix("llama_tokens_per_second") {
+                    let parts = trimmed.components(separatedBy: " ")
+                    if parts.count >= 2, let val = Double(parts[1]) {
+                        tokensPerSecond = val
+                    }
+                } else if trimmed.hasPrefix("llama_tokens_predicted_total") {
+                    let parts = trimmed.components(separatedBy: " ")
+                    if parts.count >= 2, let val = Int(parts[1]) {
+                        totalTokensGenerated = val
+                    }
+                }
+            }
+        } catch { return }
+    }
+
     // ─── LIFECYCLE ───────────────────────────────────────────────────────────────
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -126,7 +162,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.font = NSFont.systemFont(ofSize: 14)
         _ = shell("launchctl unload ~/Library/LaunchAgents/com.llama.server.plist 2>/dev/null")
         updateMenu()
-        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.checkHealth() }
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            self?.checkHealth()
+            self?.fetchMetrics()
+        }
     }
 
     // ─── MENU ────────────────────────────────────────────────────────────────────
@@ -138,9 +177,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Status
         let idleMin = isRunning ? Int(Date().timeIntervalSince(lastActivity) / 60) : 0
         let idleStr = (isRunning && idleMin > 0) ? " idle \(idleMin)m" : ""
+        let tpsStr = (isRunning && modelLoaded && tokensPerSecond > 0) ? String(format: " ~%.0f tok/s", tokensPerSecond) : ""
         let statusTitle: String
         if isRunning && modelLoaded {
-            statusTitle = "● Running (\(currentModel))\(idleStr)"
+            statusTitle = "● Running (\(currentModel))\(idleStr)\(tpsStr)"
         } else if isRunning {
             statusTitle = "● Idle (\(currentModel))"
         } else {
@@ -220,10 +260,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self; item.representedObject = preset; samplingMenu.addItem(item)
         }
         samplingMenu.addItem(NSMenuItem.separator())
-        let _ = samplingMenu.addItem(NSMenuItem(title: "Temperature: \(temperature)", action: nil, keyEquivalent: ""))
-        let _ = samplingMenu.addItem(NSMenuItem(title: "Top-P: \(topP)", action: nil, keyEquivalent: ""))
-        let _ = samplingMenu.addItem(NSMenuItem(title: "Min-P: \(minP)", action: nil, keyEquivalent: ""))
-        let _ = samplingMenu.addItem(NSMenuItem(title: "Repeat Penalty: \(repeatPenalty)", action: nil, keyEquivalent: ""))
+        samplingMenu.addItem(NSMenuItem(title: "Temperature: \(temperature)", action: nil, keyEquivalent: ""))
+        samplingMenu.addItem(NSMenuItem(title: "Top-P: \(topP)", action: nil, keyEquivalent: ""))
+        samplingMenu.addItem(NSMenuItem(title: "Min-P: \(minP)", action: nil, keyEquivalent: ""))
+        samplingMenu.addItem(NSMenuItem(title: "Repeat Penalty: \(repeatPenalty)", action: nil, keyEquivalent: ""))
         let samplingTitle = "Sampling: " + samplingPreset.capitalized
         let samplingItem = NSMenuItem(title: samplingTitle, action: nil, keyEquivalent: "")
         samplingItem.submenu = samplingMenu; adv.addItem(samplingItem)
@@ -264,18 +304,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func setCtx(_ s: NSMenuItem) { if let v = s.representedObject as? Int { contextSize = v }; if isRunning { restartServer() } else { updateMenu() } }
     @objc func setKV(_ s: NSMenuItem) { if let v = s.representedObject as? String { kvCacheType = v }; if isRunning { restartServer() } else { updateMenu() } }
     @objc func setBatch(_ s: NSMenuItem) { if let v = s.representedObject as? Int { _ = v }; if isRunning { restartServer() } else { updateMenu() } }
-
-    @objc func setSamplingPreset(_ s: NSMenuItem) {
-        if let preset = s.representedObject as? String {
-            applySamplingPreset(preset)
-        }
-        if isRunning { restartServer() } else { updateMenu() }
-    }
+    @objc func setSamplingPreset(_ s: NSMenuItem) { if let p = s.representedObject as? String { applySamplingPreset(p) }; if isRunning { restartServer() } else { updateMenu() } }
 
     @objc func resetAll() {
         contextSize = 16384; kvCacheType = "q8_0"; useMlock = false; useHighPrio = false
         useFlashAttn = true; useSpeculative = false; draftModel = ""; customFlags = []; useCustomFlags = false
-        applySamplingPreset("standard")
+        applySamplingPreset("standard"); tokensPerSecond = 0; totalTokensGenerated = 0
         updateMenu()
     }
 
@@ -319,7 +353,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     flags += ["--spec-draft-model", dp, "--spec-draft-type-k", "q8_0", "--spec-draft-type-v", "q8_0", "--spec-type", "draft-simple"]
                 }
             }
-            // Sampling flags (only add if non-default or preset is active)
             if hasSamplingOverrides() || samplingPreset != "standard" {
                 flags += ["--temp", String(format: "%.2f", temperature)]
                 flags += ["--top-p", String(format: "%.2f", topP)]
@@ -351,7 +384,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func stopServer() {
-        serverTask?.terminate(); serverTask = nil; modelLoaded = false
+        serverTask?.terminate(); serverTask = nil; modelLoaded = false; tokensPerSecond = 0; totalTokensGenerated = 0
         _ = shell("pkill -f llama-server 2>/dev/null"); sleep(1)
         isRunning = false; updateMenu()
     }
@@ -370,7 +403,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         do { try t.run(); t.waitUntilExit()
             let was = isRunning; isRunning = (t.terminationStatus == 0)
             if was != isRunning { DispatchQueue.main.async { [weak self] in self?.updateMenu() } }
-        } catch { if isRunning { isRunning = false; modelLoaded = false; DispatchQueue.main.async { [weak self] in self?.updateMenu() } } }
+        } catch { if isRunning { isRunning = false; modelLoaded = false; tokensPerSecond = 0; DispatchQueue.main.async { [weak self] in self?.updateMenu() } } }
     }
 
     func healthy() -> Bool {

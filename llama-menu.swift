@@ -139,12 +139,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                   let output = String(data: data, encoding: .utf8) else { return }
             for line in output.components(separatedBy: "\n") {
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.hasPrefix("llama_tokens_per_second") {
+                if trimmed.hasPrefix("llamacpp:predicted_tokens_seconds") {
                     let parts = trimmed.components(separatedBy: " ")
                     if parts.count >= 2, let val = Double(parts[1]) {
                         tokensPerSecond = val
                     }
-                } else if trimmed.hasPrefix("llama_tokens_predicted_total") {
+                } else if trimmed.hasPrefix("llamacpp:tokens_predicted_total") {
                     let parts = trimmed.components(separatedBy: " ")
                     if parts.count >= 2, let val = Int(parts[1]) {
                         totalTokensGenerated = val
@@ -316,7 +316,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func customCmd() {
         let a = NSAlert(); a.messageText = "Custom Flags"; a.informativeText = "Enter flags, include -m path:"
         let i = NSTextField(frame: NSRect(x:0,y:0,width:500,height:60))
-        i.stringValue = "-m \(modelsDir)/\(currentModel) -ngl 99 --ctx-size 16384 -fa auto --tools all --jinja --ui-mcp-proxy --host 127.0.0.1 --port 11434"
+        i.stringValue = "-m \(modelsDir)/\(currentModel) -ngl 99 --ctx-size 16384 -fa auto --tools all --jinja --ui-mcp-proxy --metrics --host 127.0.0.1 --port 11434"
         a.accessoryView = i; a.addButton(withTitle: "Start"); a.addButton(withTitle: "Cancel")
         if a.runModal() == .alertFirstButtonReturn {
             customFlags = i.stringValue.split(separator: " ").map(String.init); useCustomFlags = true; restartServer()
@@ -342,7 +342,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         else {
             flags = ["-m", mp, "-ngl","99","--ctx-size","\(contextSize)","--threads","8",
                      "--cache-type-k",kvCacheType,"--cache-type-v",kvCacheType,
-                     "--tools","all","--jinja","--ui-mcp-proxy",
+                     "--tools","all","--jinja","--ui-mcp-proxy","--metrics",
                      "--host","127.0.0.1","--port",port,"--sleep-idle-seconds","180"]
             if useFlashAttn { flags += ["-fa","auto"] }
             if useMlock { flags += ["--mlock"] }

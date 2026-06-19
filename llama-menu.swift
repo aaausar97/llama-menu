@@ -42,6 +42,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var totalTokensGenerated: Int = 0
     var totalPromptTokens: Int = 0
     var nDecodeCalls: Int = 0
+    var metricsGenItem: NSMenuItem?
+    var metricsPromptItem: NSMenuItem?
+    var metricsTotalItem: NSMenuItem?
+    var metricsDecodeItem: NSMenuItem?
 
     let modelsDir = "\(NSHomeDirectory())/.models"
     let serverBinary = "/opt/homebrew/bin/llama-server"
@@ -202,20 +206,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         let models = scanModels()
 
-        // Status
-        let idleMin = isRunning ? Int(Date().timeIntervalSince(lastActivity) / 60) : 0
-        let idleStr = (isRunning && modelLoaded && tokensPerSecond == 0 && promptTokensPerSecond == 0 && idleMin > 0) ? " idle \(idleMin)m" : ""
-        let genTpsStr = (tokensPerSecond > 0) ? String(format: " ~%.0f tok/s", tokensPerSecond) : ""
-        let promptTpsStr = (promptTokensPerSecond > 0) ? String(format: " in: %.0f tok/s", promptTokensPerSecond) : ""
+        // Status — concise, fits in menu bar
         let statusTitle: String
         if isRunning && modelLoaded {
-            if tokensPerSecond > 0 || promptTokensPerSecond > 0 {
-                statusTitle = "● Generating (\(currentModel))\(genTpsStr)\(promptTpsStr)"
+            if tokensPerSecond > 0 {
+                statusTitle = String(format: "● %@ ~%.0f tok/s", currentModel, tokensPerSecond)
+            } else if promptTokensPerSecond > 0 {
+                statusTitle = "● \(currentModel) reading..."
             } else {
-                statusTitle = "● Ready (\(currentModel))\(idleStr)"
+                let idleMin = Int(Date().timeIntervalSince(lastActivity) / 60)
+                let idleStr = idleMin > 0 ? " idle \(idleMin)m" : ""
+                statusTitle = "● \(currentModel)\(idleStr)"
             }
         } else if isRunning {
-            statusTitle = "● Loading (\(currentModel))"
+            statusTitle = "● \(currentModel) loading..."
         } else {
             statusTitle = "○ Stopped"
         }
@@ -303,10 +307,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Metrics submenu
         let metricsMenu = NSMenu(title: "Metrics")
-        let metricsTpsItem = NSMenuItem(title: "Generation: -- tok/s", action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsTpsItem)
-        let metricsPromptItem = NSMenuItem(title: "Prompt: -- tok/s", action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsPromptItem)
-        let metricsTotalItem = NSMenuItem(title: "Total tokens: --", action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsTotalItem)
-        let metricsDecodeItem = NSMenuItem(title: "Decode calls: --", action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsDecodeItem)
+        metricsGenItem = NSMenuItem(title: String(format: "Gen: %.0f tok/s", tokensPerSecond), action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsGenItem!)
+        metricsPromptItem = NSMenuItem(title: String(format: "Prompt: %.0f tok/s", promptTokensPerSecond), action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsPromptItem!)
+        metricsTotalItem = NSMenuItem(title: String(format: "Generated: %d tokens", totalTokensGenerated), action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsTotalItem!)
+        metricsDecodeItem = NSMenuItem(title: String(format: "Decodes: %d", nDecodeCalls), action: nil, keyEquivalent: ""); metricsMenu.addItem(metricsDecodeItem!)
         let metricsItem = NSMenuItem(title: "📊 Metrics", action: nil, keyEquivalent: "")
         metricsItem.submenu = metricsMenu; adv.addItem(metricsItem)
 

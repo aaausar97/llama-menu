@@ -36,7 +36,8 @@ Running local LLMs on macOS shouldn't be complicated. **llama-menu** gives you t
 - **Batch Size** picker (512, 1024, 2048, 4096) — pop-out submenu
 - **Memory Lock** and **High Priority** toggles (OFF by default)
 - **Flash Attention** toggle (ON by default)
-- **Speculative Decoding** — submenu with draft model selection (hidden unless draft models exist in `~/.models/`)
+- **Speculative Decoding** — submenu with draft model selection
+- **Sampling Presets** — Standard, Reasoning, Creative, Structured modes
 - **Custom Flags** — paste any llama-server command for full control
 - **Unload Model** — stops server, frees RAM
 - **Open Web Chat** — opens `http://127.0.0.1:11434` in browser
@@ -65,6 +66,7 @@ Advanced Settings
   ▸ Speculative Decoding
     Enable
     Draft: Qwen_Qwen3.5-0.8B-Q4_K_M.gguf (553 MB)
+  ▸ Sampling: Standard    ← pop-out: Standard ✓, Reasoning, Creative, Structured
   ─────────────────────
   Custom Flags...
   Reset to Defaults
@@ -272,6 +274,13 @@ For a 24GB Mac, this sets the limit to ~16GB. This is a **ceiling**, not a reser
 ### Speculative Decoding (hover to expand)
 - Enable/disable toggle
 - Pick draft model from available files in `~/.models/`
+
+### Sampling Presets (hover to expand)
+- **Standard** — balanced for general tasks (temp 0.7, top-p 0.9, top-k 40)
+- **Reasoning** — raw sampling for chain-of-thought models (temp 1.0, top-p 1.0, top-k 0). For QwQ, DeepSeek-R1, gpt-oss.
+- **Creative** — DRY + XTC for fiction/roleplay (temp 0.8, top-p 0.95)
+- **Structured** — low temp for JSON/grammar outputs (temp 0.3, top-p 0.7)
+- Current values shown for Temperature, Top-P, Min-P, Repeat Penalty
 
 ### Server Control
 - **Start Server** — loads model and starts serving
